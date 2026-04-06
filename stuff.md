@@ -3,6 +3,7 @@ M = Milestone
 
 M1 — hulundb: wire format (message parsing/encoding, name compression, all RR types). kajus: UDP server, forwarding logic, integration with upstream resolver.
 Integration PR at end of M1: kajus opens a PR on dev that wires both pieces together. hulundb reviews.
+Deadline - 2026-04-15
 
 M2 — kajus: recursive resolution loop, referral vs authoritative detection, glue records. hulundb: CNAME chain following, record type handling in the resolution path.
 
