@@ -34,3 +34,31 @@ camelCase
 The Go convention for single-method interfaces is to name them as the method name plus -er
 
 Package - lowercase, one word  EX: dns
+
+hulundb-kajus-dns/
+├── go.mod
+├── go.sum
+├── main.go                    # Entry point. Wires everything together and starts the server.
+│
+├── dns/                       # Core DNS protocol — wire format only, no IO.
+│   ├── message.go             # Message struct, header parsing/encoding.
+│   ├── question.go            # Question section parsing/encoding.
+│   ├── record.go              # Resource record types (A, AAAA, NS, CNAME, MX, SOA).
+│   ├── name.go                # Name parsing, encoding, and compression/decompression.
+│   └── message_test.go        # Table-driven tests for round-trip parsing.
+│
+├── server/                    # UDP listener. Accepts queries, hands off to resolver.
+│   ├── server.go              # ListenAndServe, goroutine-per-query dispatch.
+│   └── server_test.go
+│
+├── resolver/                  # The recursive walk logic. No parsing, no caching here.
+│   ├── resolver.go            # Resolve() — the main recursive loop.
+│   ├── roots.go               # Hardcoded root nameserver addresses.
+│   └── resolver_test.go
+│
+├── cache/                     # TTL-aware in-memory cache. No DNS logic here.
+│   ├── cache.go               # Get/Set/evict, TTL decrement, NXDOMAIN entries.
+│   └── cache_test.go
+│
+└── metrics/                   # Counters and timers. Thin wrapper, no dependencies.
+    └── metrics.go             # CacheHits, Latency, UpstreamQueries.
