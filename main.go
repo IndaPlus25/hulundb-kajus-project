@@ -7,7 +7,9 @@ import (
 )
 
 func main() {
-	if err := server.Start("0.0.0.0:5353"); err != nil {
+	err := server.Start("0.0.0.0:5355")
+
+	if err != nil {
 		fmt.Println("Failed to start server:", err)
 		os.Exit(1)
 	}
