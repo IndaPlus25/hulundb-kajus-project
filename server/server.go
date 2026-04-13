@@ -51,6 +51,10 @@ func Start(addr string) error {
 			fmt.Println("Error resolving:", err)
 			continue
 		}
-		conn.WriteTo(response, addr)
+		_, err = conn.WriteTo(response, addr)
+		if err != nil {
+			fmt.Println("Error writing response:", err)
+			return err
+		}
 	}
 }
