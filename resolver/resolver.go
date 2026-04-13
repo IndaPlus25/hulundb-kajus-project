@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"fmt"
 	"net"
 	"time"
 )
@@ -15,7 +16,11 @@ func Resolv(query []byte) ([]byte, error) {
 	defer conn.Close()
 
 	//Sends the question
-	conn.Write(query)
+	_, err = conn.Write(query)
+	if err != nil {
+		fmt.Println("Error sending to upstream:", err)
+		return nil, err
+	}
 
 	//Deadline for reading answer
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
