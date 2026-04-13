@@ -6,12 +6,12 @@ import (
 	"time"
 )
 
-// Kriterium 1: Servern startar och lyssnar
+// Criterion 1: Server starts and listens
 func TestServerStarts(t *testing.T) {
 	go Start("0.0.0.0:15353")
-	time.Sleep(50 * time.Millisecond) // ge servern tid att starta
+	time.Sleep(50 * time.Millisecond) // give server time to start
 
-	// Försök ansluta — om det lyckas lyssnar servern
+	// Try to connect — if it succeeds server is listening
 	conn, err := net.Dial("udp", "127.0.0.1:15353")
 	if err != nil {
 		t.Fatalf("Server is not listening: %v", err)
@@ -19,7 +19,7 @@ func TestServerStarts(t *testing.T) {
 	conn.Close()
 }
 
-// Kriterium 2: Servern tar emot råa bytes
+// Criterion 2: Server receives raw bytes
 func TestServerReceivesBytes(t *testing.T) {
 	go Start("0.0.0.0:15354")
 	time.Sleep(50 * time.Millisecond)
@@ -30,7 +30,7 @@ func TestServerReceivesBytes(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Skicka råa bytes
+	// Send raw bytes
 	payload := []byte{0x00, 0x01, 0x02, 0x03}
 	_, err = conn.Write(payload)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestServerReceivesBytes(t *testing.T) {
 	}
 }
 
-// Kriterium 3: Servern kraschar inte vid skräpdata
+// Criterion 3: Server doesn't crash with garbage data
 func TestServerHandlesGarbage(t *testing.T) {
 	go Start("0.0.0.0:15355")
 	time.Sleep(50 * time.Millisecond)
@@ -54,7 +54,7 @@ func TestServerHandlesGarbage(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Skicka ett paket till — om servern fortfarande svarar har den inte kraschat
+	// Send a packet — if the server still responds it hasn't crashed
 	_, err = conn.Write(garbage)
 	if err != nil {
 		t.Fatalf("Server crashed after garbage input: %v", err)
