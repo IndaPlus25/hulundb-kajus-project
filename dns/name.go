@@ -83,6 +83,9 @@ func EncodeName(name string) ([]byte, error) {
 
 	var buf []byte
 
+	if name == "" {
+		return nil, fmt.Errorf("empty name: use \".\" for root")
+	}
 	if name == "." { //Root edge case
 		buf = append(buf, 0x00)
 		return buf, nil
