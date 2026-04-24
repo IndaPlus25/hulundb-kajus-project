@@ -321,3 +321,97 @@ func bytesEqual(a, b []byte) bool {
 	}
 	return true
 }
+
+// ── Header ────────────────────────────────────────────────────────────────
+func TestHeaderRoundTrip(t *testing.T) {
+	tests := []struct {
+		name   string
+		header Header
+	}{
+		{
+			name: "query header",
+			header: Header{
+				ID:      0x1234,
+				QR:      false,
+				Opcode:  OpcodeQuery,
+				RD:      true,
+				QDCount: 1,
+			},
+		},
+		{
+			name: "response header",
+			header: Header{
+				ID:      0x1234,
+				QR:      true,
+				Opcode:  OpcodeQuery,
+				AA:      true,
+				RD:      true,
+				RA:      true,
+				RCode:   RCodeNoError,
+				QDCount: 1,
+				ANCount: 1,
+			},
+		},
+		{
+			name: "nxdomain response",
+			header: Header{
+				ID:    0x5678,
+				QR:    true,
+				RCode: RCodeNameError,
+			},
+		},
+		{
+			name: "truncated response",
+			header: Header{
+				ID:    0xABCD,
+				QR:    true,
+				TC:    true,
+				RA:    true,
+				RCode: RCodeNoError,
+			},
+		},
+		{
+			name: "status opcode",
+			header: Header{
+				ID:     0x0001,
+				QR:     false,
+				Opcode: OpcodeStatus,
+				RD:     false,
+			},
+		},
+		{
+			name: "server failure",
+			header: Header{
+				ID:    0x0002,
+				QR:    true,
+				RCode: RCodeServerFailure,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := tt.header.Encode()
+
+			if len(encoded) != 12 {
+				t.Fatalf("expected 12 bytes, got %d", len(encoded))
+			}
+
+			decoded, err := DecodeHeader(encoded)
+			if err != nil {
+				t.Fatalf("DecodeHeader error: %v", err)
+			}
+
+			if decoded != tt.header {
+				t.Errorf("round-trip mismatch\n  got:  %+v\n  want: %+v", decoded, tt.header)
+			}
+		})
+	}
+}
+
+func TestDecodeHeaderTooShort(t *testing.T) {
+	_, err := DecodeHeader([]byte{0x00, 0x01})
+	if err == nil {
+		t.Error("expected error for short input, got nil")
+	}
+}
