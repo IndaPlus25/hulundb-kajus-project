@@ -58,9 +58,10 @@ func DecodeHeader(b []byte) (Header, error) {
 	h.ID = binary.BigEndian.Uint16(b[0:2])
 	flags := binary.BigEndian.Uint16(b[2:4])
 
-	if (flags>>4)&0x7 != 0 {
-		return Header{}, fmt.Errorf("zero bits are not zero")
-	}
+	//Logga error i framtiden
+	// if (flags>>4)&0x7 != 0 {
+	// 	return Header{}, fmt.Errorf("zero bits are not zero")
+	// }
 
 	h.QR = ((flags >> 15) & 0x1) != 0
 	h.Opcode = uint8((flags >> shiftOpcode) & 0xF)
