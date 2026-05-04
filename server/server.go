@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"hulundb-kajus-dns/dns"
 	"hulundb-kajus-dns/resolver"
 	"net"
 	"os"
@@ -45,13 +46,31 @@ func Start(addr string) error {
 
 		// TODO: parser (hulundb)
 
-		// TODO: forwarding (issue 2)
-		response, err := resolver.Resolv(buf[:n])
+		_, err = dns.DecodeMessage(buf[:n])
+		if err != nil {
+			fmt.Println("Felformaterat paket:", err)
+			continue // ignorera paketet, krascha inte
+		}
+
+		response, err := resolver.Resolve(buf[:n])
 		if err != nil {
 			fmt.Println("Error resolving:", err)
 			continue
 		}
-		_, err = conn.WriteTo(response, addr)
+
+		responseMsg, err := dns.DecodeMessage(response)
+		if err != nil {
+			fmt.Println("Ogiltigt svar från upstream:", err)
+			continue
+		}
+
+		responseBytes, err := responseMsg.Encode()
+		if err != nil {
+			fmt.Println("Kunde inte enkoda:", err)
+			continue
+		}
+
+		_, err = conn.WriteTo(responseBytes, addr)
 		if err != nil {
 			fmt.Println("Error writing response:", err)
 			return err

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func Resolv(query []byte) ([]byte, error) {
+func Resolve(query []byte) ([]byte, error) {
 
 	//Connects to Googles DNS
 	conn, err := net.Dial("udp", "8.8.8.8:53")
