@@ -55,7 +55,7 @@ func DecodeName(msg []byte, offset int) (string, int, error) {
 
 		} else if b&0xC0 == 0x00 {
 			labelLen := int(b)
-			if cur+1+labelLen >= len(msg) {
+			if cur+1+labelLen > len(msg) {
 				return "", 0, fmt.Errorf("truncated compression pointer")
 			}
 			if labelLen > maxLabelLength {

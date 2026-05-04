@@ -50,7 +50,7 @@ type Header struct {
 func DecodeHeader(b []byte) (Header, error) {
 
 	if len(b) < 12 {
-		return Header{}, fmt.Errorf("header too long")
+		return Header{}, fmt.Errorf("header too short")
 	}
 
 	h := Header{}
@@ -119,4 +119,109 @@ func (h Header) Encode() []byte {
 	binary.BigEndian.PutUint16(buf[10:12], h.ARCount)
 
 	return buf
+}
+
+type Message struct {
+	Header      Header
+	Questions   []Question
+	Answers     []RR
+	Authorities []RR
+	Additionals []RR
+}
+
+func DecodeMessage(msg []byte) (Message, error) {
+	m := Message{}
+
+	// add header → m
+	header, err := DecodeHeader(msg)
+	if err != nil {
+		return Message{}, err
+	}
+	m.Header = header
+
+	offset := 12
+	// loop and append to questions
+	for i := 0; i < int(header.QDCount); i++ {
+		q, newOffset, err := DecodeQuestion(msg, offset)
+		if err != nil {
+			return Message{}, err
+		}
+		offset = newOffset
+		m.Questions = append(m.Questions, q)
+	}
+
+	// loop and append to answers
+	for i := 0; i < int(header.ANCount); i++ {
+		rr, newOffset, err := DecodeRR(msg, offset)
+		if err != nil {
+			return Message{}, err
+		}
+		offset = newOffset
+		m.Answers = append(m.Answers, rr)
+	}
+	// loop and append to authorities
+	for i := 0; i < int(header.NSCount); i++ {
+		rr, newOffset, err := DecodeRR(msg, offset)
+		if err != nil {
+			return Message{}, err
+		}
+		offset = newOffset
+		m.Authorities = append(m.Authorities, rr)
+	}
+	// loop and append to additionals
+	for i := 0; i < int(header.ARCount); i++ {
+		rr, newOffset, err := DecodeRR(msg, offset)
+		if err != nil {
+			return Message{}, err
+		}
+		offset = newOffset
+		m.Additionals = append(m.Additionals, rr)
+	}
+
+	return m, nil
+}
+
+func (m Message) Encode() ([]byte, error) {
+	m.Header.QDCount = uint16(len(m.Questions))
+	m.Header.ANCount = uint16(len(m.Answers))
+	m.Header.NSCount = uint16(len(m.Authorities))
+	m.Header.ARCount = uint16(len(m.Additionals))
+
+	// buf → header bytes
+	buf := m.Header.Encode()
+
+	// append questions
+	for _, q := range m.Questions {
+		qBytes, err := EncodeQuestion(q)
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, qBytes...)
+	}
+	// append answers
+	for _, rr := range m.Answers {
+		aBytes, err := rr.Encode()
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, aBytes...)
+	}
+	// append authorities
+	for _, rr := range m.Authorities {
+		authBytes, err := rr.Encode()
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, authBytes...)
+	}
+	// append additionals
+	for _, rr := range m.Additionals {
+		addBytes, err := rr.Encode()
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, addBytes...)
+	}
+
+	return buf, nil
 }

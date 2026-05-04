@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"net"
 	"testing"
 )
 
@@ -411,6 +412,313 @@ func TestHeaderRoundTrip(t *testing.T) {
 
 func TestDecodeHeaderTooShort(t *testing.T) {
 	_, err := DecodeHeader([]byte{0x00, 0x01})
+	if err == nil {
+		t.Error("expected error for short input, got nil")
+	}
+}
+
+// ── Question ──────────────────────────────────────────────────────────────────
+
+func TestDecodeQuestion(t *testing.T) {
+	tests := []struct {
+		name         string
+		msg          []byte
+		offset       int
+		wantQuestion Question
+		wantOffset   int
+		wantErr      bool
+	}{
+		{
+			name: "simple A query",
+			msg: append(
+				[]byte{6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0},
+				[]byte{0x00, 0x01, 0x00, 0x01}..., // type A, class IN
+			),
+			offset:       0,
+			wantQuestion: Question{Name: "google.com.", Type: 1, Class: 1},
+			wantOffset:   16,
+		},
+		{
+			name: "question not at offset zero",
+			msg: append(
+				[]byte{0xFF, 0xFF, 0xFF},
+				append(
+					[]byte{6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0},
+					[]byte{0x00, 0x1C, 0x00, 0x01}..., // type AAAA, class IN
+				)...,
+			),
+			offset:       3,
+			wantQuestion: Question{Name: "google.com.", Type: 28, Class: 1},
+			wantOffset:   19,
+		},
+		{
+			name: "question with pointer compression in name",
+			msg: append(
+				[]byte{6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0},
+				append(
+					[]byte{0xC0, 0x00},                // pointer to offset 0
+					[]byte{0x00, 0x01, 0x00, 0x01}..., // type A, class IN
+				)...,
+			),
+			offset:       12,
+			wantQuestion: Question{Name: "google.com.", Type: 1, Class: 1},
+			wantOffset:   18,
+		},
+		{
+			name:    "truncated — missing type and class",
+			msg:     []byte{6, 'g', 'o', 'o', 'g', 'l', 'e', 3, 'c', 'o', 'm', 0},
+			offset:  0,
+			wantErr: true,
+		},
+		{
+			name:    "truncated — only 2 bytes after name",
+			msg:     append([]byte{3, 'c', 'o', 'm', 0}, []byte{0x00, 0x01}...),
+			offset:  0,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, offset, err := DecodeQuestion(tt.msg, tt.offset)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DecodeQuestion() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got != tt.wantQuestion {
+				t.Errorf("question: got %+v, want %+v", got, tt.wantQuestion)
+			}
+			if offset != tt.wantOffset {
+				t.Errorf("offset: got %d, want %d", offset, tt.wantOffset)
+			}
+		})
+	}
+}
+
+func TestEncodeQuestionRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		q    Question
+	}{
+		{name: "A query", q: Question{Name: "google.com.", Type: 1, Class: 1}},
+		{name: "AAAA query", q: Question{Name: "example.com.", Type: 28, Class: 1}},
+		{name: "MX query", q: Question{Name: "mail.example.com.", Type: 15, Class: 1}},
+		{name: "root query", q: Question{Name: ".", Type: 1, Class: 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := EncodeQuestion(tt.q)
+			if err != nil {
+				t.Fatalf("EncodeQuestion() error: %v", err)
+			}
+			got, _, err := DecodeQuestion(encoded, 0)
+			if err != nil {
+				t.Fatalf("DecodeQuestion() error: %v", err)
+			}
+			if got != tt.q {
+				t.Errorf("round-trip: got %+v, want %+v", got, tt.q)
+			}
+		})
+	}
+}
+
+// ── RR ────────────────────────────────────────────────────────────────────────
+
+func TestRRRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		rr   RR
+	}{
+		{
+			name: "A record",
+			rr: RR{
+				Header: RRHeader{Name: "google.com.", Type: 1, Class: 1, TTL: 300},
+				Data:   ARecord{IP: net.IPv4(142, 250, 74, 46).To4()},
+			},
+		},
+		{
+			name: "AAAA record",
+			rr: RR{
+				Header: RRHeader{Name: "google.com.", Type: 28, Class: 1, TTL: 300},
+				Data:   AAAARecord{IP: net.ParseIP("2a00:1450:4005:802::200e")},
+			},
+		},
+		{
+			name: "CNAME record",
+			rr: RR{
+				Header: RRHeader{Name: "www.example.com.", Type: 5, Class: 1, TTL: 3600},
+				Data:   CNAMERecord{Name: "example.com."},
+			},
+		},
+		{
+			name: "NS record",
+			rr: RR{
+				Header: RRHeader{Name: "example.com.", Type: 2, Class: 1, TTL: 86400},
+				Data:   NSRecord{Name: "ns1.example.com."},
+			},
+		},
+		{
+			name: "MX record",
+			rr: RR{
+				Header: RRHeader{Name: "example.com.", Type: 15, Class: 1, TTL: 3600},
+				Data:   MXRecord{Preference: 10, Exchange: "mail.example.com."},
+			},
+		},
+		{
+			name: "SOA record",
+			rr: RR{
+				Header: RRHeader{Name: "example.com.", Type: 6, Class: 1, TTL: 3600},
+				Data: SOARecord{
+					MName:   "ns1.example.com.",
+					RName:   "admin.example.com.",
+					Serial:  2024010101,
+					Refresh: 3600,
+					Retry:   900,
+					Expire:  604800,
+					Minimum: 300,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := tt.rr.Encode()
+			if err != nil {
+				t.Fatalf("RR.Encode() error: %v", err)
+			}
+			got, _, err := DecodeRR(encoded, 0)
+			if err != nil {
+				t.Fatalf("DecodeRR() error: %v", err)
+			}
+			// re-encode the decoded RR and compare bytes
+			reEncoded, err := got.Encode()
+			if err != nil {
+				t.Fatalf("re-encode error: %v", err)
+			}
+			if !bytesEqual(encoded, reEncoded) {
+				t.Errorf("round-trip byte mismatch\n  got:  %v\n  want: %v", reEncoded, encoded)
+			}
+		})
+	}
+}
+
+// ── Message ───────────────────────────────────────────────────────────────────
+
+func TestMessageRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  Message
+	}{
+		{
+			name: "query with one question",
+			msg: Message{
+				Header: Header{
+					ID:      0x1234,
+					QR:      false,
+					Opcode:  OpcodeQuery,
+					RD:      true,
+					QDCount: 1,
+				},
+				Questions: []Question{
+					{Name: "google.com.", Type: 1, Class: 1},
+				},
+			},
+		},
+		{
+			name: "response with A record answer",
+			msg: Message{
+				Header: Header{
+					ID:      0x1234,
+					QR:      true,
+					Opcode:  OpcodeQuery,
+					AA:      false,
+					RD:      true,
+					RA:      true,
+					RCode:   RCodeNoError,
+					QDCount: 1,
+					ANCount: 1,
+				},
+				Questions: []Question{
+					{Name: "google.com.", Type: 1, Class: 1},
+				},
+				Answers: []RR{
+					{
+						Header: RRHeader{Name: "google.com.", Type: 1, Class: 1, TTL: 300},
+						Data:   ARecord{IP: net.IPv4(142, 250, 74, 46).To4()},
+					},
+				},
+			},
+		},
+		{
+			name: "response with multiple sections",
+			msg: Message{
+				Header: Header{
+					ID: 0x5678, QR: true, RD: true, RA: true,
+					QDCount: 1, ANCount: 1, NSCount: 1, ARCount: 1,
+				},
+				Questions: []Question{
+					{Name: "example.com.", Type: 1, Class: 1},
+				},
+				Answers: []RR{
+					{
+						Header: RRHeader{Name: "example.com.", Type: 1, Class: 1, TTL: 300},
+						Data:   ARecord{IP: net.IPv4(93, 184, 216, 34).To4()},
+					},
+				},
+				Authorities: []RR{
+					{
+						Header: RRHeader{Name: "example.com.", Type: 2, Class: 1, TTL: 86400},
+						Data:   NSRecord{Name: "ns1.example.com."},
+					},
+				},
+				Additionals: []RR{
+					{
+						Header: RRHeader{Name: "ns1.example.com.", Type: 1, Class: 1, TTL: 86400},
+						Data:   ARecord{IP: net.IPv4(205, 251, 196, 1).To4()},
+					},
+				},
+			},
+		},
+		{
+			name: "NXDOMAIN response",
+			msg: Message{
+				Header: Header{
+					ID: 0xABCD, QR: true, RCode: RCodeNameError, QDCount: 1,
+				},
+				Questions: []Question{
+					{Name: "doesnotexist.example.com.", Type: 1, Class: 1},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := tt.msg.Encode()
+			if err != nil {
+				t.Fatalf("Message.Encode() error: %v", err)
+			}
+			got, err := DecodeMessage(encoded)
+			if err != nil {
+				t.Fatalf("DecodeMessage() error: %v", err)
+			}
+			reEncoded, err := got.Encode()
+			if err != nil {
+				t.Fatalf("re-encode error: %v", err)
+			}
+			if !bytesEqual(encoded, reEncoded) {
+				t.Errorf("round-trip byte mismatch\n  original:  %v\n  reEncoded: %v", encoded, reEncoded)
+			}
+		})
+	}
+}
+
+func TestDecodeMessageTooShort(t *testing.T) {
+	_, err := DecodeMessage([]byte{0x00, 0x01, 0x02})
 	if err == nil {
 		t.Error("expected error for short input, got nil")
 	}
