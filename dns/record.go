@@ -6,6 +6,15 @@ import (
 	"net"
 )
 
+const (
+	TypeA     uint16 = 1
+	TypeNS    uint16 = 2
+	TypeCNAME uint16 = 5
+	TypeSOA   uint16 = 6
+	TypeMX    uint16 = 15
+	TypeAAAA  uint16 = 28
+)
+
 type RData interface {
 	Encode() ([]byte, error)
 }
@@ -14,40 +23,16 @@ type ARecord struct {
 	IP net.IP
 }
 
-func (r ARecord) Encode() ([]byte, error) {
-	ip := r.IP.To4()
-	if ip == nil {
-		return nil, fmt.Errorf("not a valid IPv4 address")
-	}
-	return ip, nil
-}
-
 type AAAARecord struct {
 	IP net.IP
-}
-
-func (r AAAARecord) Encode() ([]byte, error) {
-	ip := r.IP.To16()
-	if ip == nil {
-		return nil, fmt.Errorf("not a valid IPv6 address")
-	}
-	return ip, nil
 }
 
 type NSRecord struct {
 	Name string
 }
 
-func (r NSRecord) Encode() ([]byte, error) {
-	return EncodeName(r.Name)
-}
-
 type CNAMERecord struct {
 	Name string
-}
-
-func (r CNAMERecord) Encode() ([]byte, error) {
-	return EncodeName(r.Name)
 }
 
 type SOARecord struct {
@@ -58,6 +43,35 @@ type SOARecord struct {
 	Retry   uint32
 	Expire  uint32
 	Minimum uint32
+}
+
+type MXRecord struct {
+	Preference uint16
+	Exchange   string
+}
+
+func (r ARecord) Encode() ([]byte, error) {
+	ip := r.IP.To4()
+	if ip == nil {
+		return nil, fmt.Errorf("not a valid IPv4 address")
+	}
+	return ip, nil
+}
+
+func (r AAAARecord) Encode() ([]byte, error) {
+	ip := r.IP.To16()
+	if ip == nil {
+		return nil, fmt.Errorf("not a valid IPv6 address")
+	}
+	return ip, nil
+}
+
+func (r NSRecord) Encode() ([]byte, error) {
+	return EncodeName(r.Name)
+}
+
+func (r CNAMERecord) Encode() ([]byte, error) {
+	return EncodeName(r.Name)
 }
 
 func (r SOARecord) Encode() ([]byte, error) {
@@ -86,11 +100,6 @@ func (r SOARecord) Encode() ([]byte, error) {
 	buf = append(buf, timers...)
 
 	return buf, nil
-}
-
-type MXRecord struct {
-	Preference uint16
-	Exchange   string
 }
 
 func (r MXRecord) Encode() ([]byte, error) {
@@ -193,17 +202,17 @@ func DecodeRData(msg []byte, offset int, rrType uint16, rdLength uint16) (RData,
 	rdata := msg[offset : offset+int(rdLength)]
 
 	switch rrType {
-	case 1:
+	case TypeA:
 		return DecodeARecord(rdata)
-	case 2:
+	case TypeNS:
 		return DecodeNSRecord(msg, offset)
-	case 5:
+	case TypeCNAME:
 		return DecodeCNAMERecord(msg, offset)
-	case 6:
+	case TypeSOA:
 		return DecodeSOARecord(msg, offset)
-	case 15:
+	case TypeMX:
 		return DecodeMXRecord(msg, offset)
-	case 28:
+	case TypeAAAA:
 		return DecodeAAAARecord(rdata)
 	default:
 		return nil, fmt.Errorf("unknown RData type")
