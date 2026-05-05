@@ -26,7 +26,7 @@ func TestResolveGoogle(t *testing.T) {
 		0x00, 0x01, // class IN
 	}
 
-	response, err := Resolve(query)
+	response, err := Resolve(query, 0)
 
 	if err != nil {
 		t.Fatalf("Got error: %v", err)
@@ -49,8 +49,8 @@ func TestResolveTimeout(t *testing.T) {
 }
 
 // Tests that an empty packet doesn't crash
-func TestResolveEempty(t *testing.T) {
-	_, err := Resolve([]byte{})
+func TestResolvEmpty(t *testing.T) {
+	_, err := Resolve([]byte{}, 0)
 	// We expect an error, not a crash
 	if err == nil {
 		t.Fatal("Expected error for empty packet")
