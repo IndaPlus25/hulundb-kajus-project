@@ -37,7 +37,27 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 		}
 	}
 	if len(msg.Answers) == 0 {
+		// Försök 1 — finns IP:n direkt?
+		for _, rr := range msg.Additionals {
+			if a, ok := rr.Data.(dns.ARecord); ok {
+				target = a.IP.String()
+				break
+			}
+		}
 
+		// Försök 2 — finns bara namnet?
+		if target == "" {
+			for _, rr := range msg.Authorities {
+				if ns, ok := rr.Data.(dns.NSRecord); ok {
+					// resolve ns.Name för att få IP
+				}
+			}
+		}
+
+		// Inget hittades alls
+		if target == "" {
+			return nil, fmt.Errorf("could not find next nameserver")
+		}
 	}
 
 	return Resolve(query, depth+1)
