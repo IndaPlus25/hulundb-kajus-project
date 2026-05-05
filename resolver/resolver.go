@@ -3,6 +3,7 @@ package resolver
 import (
 	"fmt"
 	"hulundb-kajus-dns/dns"
+	"math/rand"
 	"net"
 	"time"
 )
@@ -100,4 +101,28 @@ func sendDNS(query []byte, target string) ([]byte, error) {
 	}
 
 	return buf[:n], nil
+}
+
+func buildQuery(name string, qtype uint16) ([]byte, error) {
+	id := uint16(rand.Intn(65536))
+	msg := dns.Message{
+		Header: dns.Header{
+			ID:      id,    // random id
+			QR:      false, // query
+			Opcode:  0,     // standard query
+			RD:      false, // no recursion desired
+			QDCount: 1,
+			ANCount: 0,
+			NSCount: 0,
+			ARCount: 0,
+		},
+		Questions: []dns.Question{
+			{Name: name, Type: qtype, Class: 1},
+		},
+		Answers:     []dns.RR{},
+		Authorities: []dns.RR{},
+		Additionals: []dns.RR{},
+	}
+
+	return msg.Encode()
 }
