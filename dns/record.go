@@ -6,6 +6,15 @@ import (
 	"net"
 )
 
+const (
+	TypeA     uint16 = 1
+	TypeNS    uint16 = 2
+	TypeCNAME uint16 = 5
+	TypeSOA   uint16 = 6
+	TypeMX    uint16 = 15
+	TypeAAAA  uint16 = 28
+)
+
 type RData interface {
 	Encode() ([]byte, error)
 }
@@ -193,17 +202,17 @@ func DecodeRData(msg []byte, offset int, rrType uint16, rdLength uint16) (RData,
 	rdata := msg[offset : offset+int(rdLength)]
 
 	switch rrType {
-	case 1:
+	case TypeA:
 		return DecodeARecord(rdata)
-	case 2:
+	case TypeNS:
 		return DecodeNSRecord(msg, offset)
-	case 5:
+	case TypeCNAME:
 		return DecodeCNAMERecord(msg, offset)
-	case 6:
+	case TypeSOA:
 		return DecodeSOARecord(msg, offset)
-	case 15:
+	case TypeMX:
 		return DecodeMXRecord(msg, offset)
-	case 28:
+	case TypeAAAA:
 		return DecodeAAAARecord(rdata)
 	default:
 		return nil, fmt.Errorf("unknown RData type")
