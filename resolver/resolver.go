@@ -14,22 +14,34 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 		return nil, err
 	}
 
-	for {
-		response, err := sendDNS(query, target)
-		if err != nil {
-			return nil, err
-		}
-
-		// Decode answer
-		msg, err := dns.DecodeMessage(response)
-		if err != nil {
-			return nil, err
-		}
-
-		//Next Issue
-
-		return Resolve(query, depth+1)
+	response, err := sendDNS(query, target)
+	if err != nil {
+		return nil, err
 	}
+
+	// Decode answer
+	msg, err := dns.DecodeMessage(response)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(msg.Answers) > 0 {
+		for _, rr := range msg.Answers {
+			if rr.Header.Type == msg.Questions[0].Type {
+				// Found the answer type we asked for
+				return response, nil
+			}
+			if rr.Header.Type == 5 { // CNAME
+				return nil, nil // TODO: Hugo CNAME
+			}
+		}
+	}
+	if len(msg.Answers) == 0 {
+
+	}
+
+	return Resolve(query, depth+1)
+
 }
 
 func queryRootServers(query []byte) (string, error) {
