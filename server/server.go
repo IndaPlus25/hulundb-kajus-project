@@ -44,7 +44,7 @@ func Start(addr string) error {
 		fmt.Printf("Received %d bytes from %s\n", n, addr)
 
 		// Query upstream DNS resolver with the received packet
-		response, err := resolver.Resolve(buf[:n])
+		response, err := resolver.Resolve(buf[:n], 0)
 		if err != nil {
 			fmt.Println("Error resolving:", err)
 			continue
