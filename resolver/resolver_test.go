@@ -8,7 +8,7 @@ import (
 )
 
 // Tests that a real DNS query for google.com receives a response
-func TestResolvGoogle(t *testing.T) {
+func TestResolveGoogle(t *testing.T) {
 	// A real DNS query for google.com (A-record)
 	// These bytes are a valid DNS message in wire format
 	query := []byte{
@@ -26,7 +26,7 @@ func TestResolvGoogle(t *testing.T) {
 		0x00, 0x01, // class IN
 	}
 
-	response, err := Resolv(query)
+	response, err := Resolve(query)
 
 	if err != nil {
 		t.Fatalf("Got error: %v", err)
@@ -37,27 +37,27 @@ func TestResolvGoogle(t *testing.T) {
 }
 
 // Tests that timeout works — sends to an address that never responds
-func TestResolvTimeout(t *testing.T) {
+func TestResolveTimeout(t *testing.T) {
 	query := []byte{0x00, 0x01}
 
 	// Switch temporarily to an address that never responds
 	// This tests that we don't hang forever
-	_, err := resolvWithAddr(query, "192.0.2.1:53") // TEST-NET, never responds
+	_, err := resolveWithAddr(query, "192.0.2.1:53") // TEST-NET, never responds
 	if err == nil {
 		t.Fatal("Expected timeout error but got none")
 	}
 }
 
 // Tests that an empty packet doesn't crash
-func TestResolvEmpty(t *testing.T) {
-	_, err := Resolv([]byte{})
+func TestResolveEempty(t *testing.T) {
+	_, err := Resolve([]byte{})
 	// We expect an error, not a crash
 	if err == nil {
 		t.Fatal("Expected error for empty packet")
 	}
 }
 
-func resolvWithAddr(query []byte, addr string) ([]byte, error) {
+func resolveWithAddr(query []byte, addr string) ([]byte, error) {
 	conn, err := net.Dial("udp", addr)
 	if err != nil {
 		return nil, err
