@@ -43,14 +43,14 @@ func Start(addr string) error {
 
 		fmt.Printf("Received %d bytes from %s\n", n, addr)
 
-		// TODO: parser (hulundb)
-
-		// TODO: forwarding (issue 2)
-		response, err := resolver.Resolv(buf[:n])
+		// Query upstream DNS resolver with the received packet
+		response, err := resolver.Resolve(buf[:n], 0)
 		if err != nil {
 			fmt.Println("Error resolving:", err)
 			continue
 		}
+
+		// Send encoded response back to client
 		_, err = conn.WriteTo(response, addr)
 		if err != nil {
 			fmt.Println("Error writing response:", err)
