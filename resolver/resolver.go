@@ -10,23 +10,27 @@ import (
 
 func Resolve(query []byte, depth int) ([]byte, error) {
 
+	if depth > 10 {
+		return nil, fmt.Errorf("too many redirects")
+	}
+
 	target, err := queryRootServers(query)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := sendDNS(query, target)
-	if err != nil {
-		return nil, err
-	}
+	for {
+		response, err := sendDNS(query, target)
+		if err != nil {
+			return nil, err
+		}
 
-	// Decode answer
-	msg, err := dns.DecodeMessage(response)
-	if err != nil {
-		return nil, err
-	}
+		// Decode answer
+		msg, err := dns.DecodeMessage(response)
+		if err != nil {
+			return nil, err
+		}
 
-	if len(msg.Answers) > 0 {
 		for _, rr := range msg.Answers {
 			if rr.Header.Type == msg.Questions[0].Type {
 				// Found the answer type we asked for
@@ -36,33 +40,55 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 				return nil, nil // TODO: Hugo CNAME
 			}
 		}
-	}
-	if len(msg.Answers) == 0 {
-		// Försök 1 — finns IP:n direkt?
+
+		// Try 1 — IP?
+		nextTarget := ""
 		for _, rr := range msg.Additionals {
 			if a, ok := rr.Data.(dns.ARecord); ok {
-				target = a.IP.String()
+				nextTarget = a.IP.String()
 				break
 			}
 		}
 
-		// Försök 2 — finns bara namnet?
-		if target == "" {
+		// Try 2 — Name?
+		if nextTarget == "" {
 			for _, rr := range msg.Authorities {
 				if ns, ok := rr.Data.(dns.NSRecord); ok {
-					// resolve ns.Name för att få IP
+					nsQuery, err := buildQuery(ns.Name, 1)
+					if err != nil {
+						continue
+					}
+
+					nsResponse, err := Resolve(nsQuery, depth+1)
+					if err != nil {
+						continue
+					}
+
+					nsMsg, err := dns.DecodeMessage(nsResponse)
+					if err != nil {
+						continue
+					}
+
+					for _, nsRR := range nsMsg.Answers {
+						if a, ok := nsRR.Data.(dns.ARecord); ok {
+							nextTarget = a.IP.String()
+							break
+						}
+					}
+					if nextTarget != "" {
+						break
+					}
 				}
 			}
 		}
 
-		// Inget hittades alls
-		if target == "" {
+		//Nothing was found
+		if nextTarget == "" {
 			return nil, fmt.Errorf("could not find next nameserver")
 		}
+
+		target = nextTarget
 	}
-
-	return Resolve(query, depth+1)
-
 }
 
 func queryRootServers(query []byte) (string, error) {
