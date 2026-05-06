@@ -215,7 +215,8 @@ func DecodeRData(msg []byte, offset int, rrType uint16, rdLength uint16) (RData,
 	case TypeAAAA:
 		return DecodeAAAARecord(rdata)
 	default:
-		return nil, fmt.Errorf("unknown RData type")
+		// return nil, fmt.Errorf("unknown RData type")
+		return nil, nil
 	}
 }
 
