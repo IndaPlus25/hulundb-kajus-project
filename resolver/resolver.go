@@ -31,13 +31,49 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 			return nil, err
 		}
 
-		for _, rr := range msg.Answers {
-			if rr.Header.Type == msg.Questions[0].Type {
-				// Found the answer type we asked for
-				return response, nil
+		if len(msg.Questions) == 0 {
+			return nil, fmt.Errorf("malformed query: no questions")
+		}
+
+		if hasCNAMEOnly(msg.Answers, msg.Questions[0].Name, msg.Questions[0].Type) { //CNAME found
+			cnameTarget, foundCNAME := getCNAMETarget(msg.Answers, msg.Questions[0].Name)
+			if !foundCNAME {
+				return nil, fmt.Errorf("malformed response from server: cname detected and not found")
 			}
-			if rr.Header.Type == 5 { // CNAME
-				return nil, nil // TODO: Hugo CNAME
+
+			matchingRecords := filterByNameAndType(msg.Answers, cnameTarget, msg.Questions[0].Type)
+			if matchingRecords != nil { // correct target provided by server
+				variableName1 := dns.Message{
+					Header: dns.Header{
+						ID:      msg.Header.ID,
+						QR:      true,
+						Opcode:  0,
+						RD:      false,
+						QDCount: 1,
+						ANCount: uint16(len(matchingRecords)),
+						NSCount: 0,
+						ARCount: 0,
+					},
+					Questions:   msg.Questions,
+					Answers:     matchingRecords,
+					Authorities: []dns.RR{},
+					Additionals: []dns.RR{},
+				}
+				return variableName1.Encode()
+			} else {
+				cnameQuery, err := buildQuery(cnameTarget, msg.Questions[0].Type)
+				if err != nil {
+					return nil, err
+				}
+				return Resolve(cnameQuery, depth+1)
+			}
+
+		} else {
+			for _, rr := range msg.Answers {
+				if rr.Header.Type == msg.Questions[0].Type {
+					// Found the answer type we asked for
+					return response, nil
+				}
 			}
 		}
 
@@ -120,7 +156,7 @@ func sendDNS(query []byte, target string) ([]byte, error) {
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	//Recieves the answer
-	buf := make([]byte, 512)
+	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return nil, err
