@@ -3,7 +3,6 @@ package resolver
 import (
 	"fmt"
 	"hulundb-kajus-dns/dns"
-	"math/rand"
 	"net"
 	"time"
 )
@@ -61,7 +60,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 				}
 				return variableName1.Encode()
 			} else {
-				cnameQuery, err := buildQuery(cnameTarget, msg.Questions[0].Type)
+				cnameQuery, err := dns.BuildQuery(cnameTarget, msg.Questions[0].Type)
 				if err != nil {
 					return nil, err
 				}
@@ -90,7 +89,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 		if nextTarget == "" {
 			for _, rr := range msg.Authorities {
 				if ns, ok := rr.Data.(dns.NSRecord); ok {
-					nsQuery, err := buildQuery(ns.Name, 1)
+					nsQuery, err := dns.BuildQuery(ns.Name, 1)
 					if err != nil {
 						continue
 					}
@@ -163,28 +162,4 @@ func sendDNS(query []byte, target string) ([]byte, error) {
 	}
 
 	return buf[:n], nil
-}
-
-func buildQuery(name string, qtype uint16) ([]byte, error) {
-	id := uint16(rand.Intn(65536))
-	msg := dns.Message{
-		Header: dns.Header{
-			ID:      id,    // random id
-			QR:      false, // query
-			Opcode:  0,     // standard query
-			RD:      false, // no recursion desired
-			QDCount: 1,
-			ANCount: 0,
-			NSCount: 0,
-			ARCount: 0,
-		},
-		Questions: []dns.Question{
-			{Name: name, Type: qtype, Class: 1},
-		},
-		Answers:     []dns.RR{},
-		Authorities: []dns.RR{},
-		Additionals: []dns.RR{},
-	}
-
-	return msg.Encode()
 }

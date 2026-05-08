@@ -3,6 +3,7 @@ package dns
 import (
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 )
 
 const (
@@ -225,4 +226,28 @@ func (m Message) Encode() ([]byte, error) {
 	}
 
 	return buf, nil
+}
+
+func BuildQuery(name string, qtype uint16) ([]byte, error) {
+	id := uint16(rand.Intn(65536))
+	msg := Message{
+		Header: Header{
+			ID:      id,    // random id
+			QR:      false, // query
+			Opcode:  0,     // standard query
+			RD:      false, // no recursion desired
+			QDCount: 1,
+			ANCount: 0,
+			NSCount: 0,
+			ARCount: 0,
+		},
+		Questions: []Question{
+			{Name: name, Type: qtype, Class: 1},
+		},
+		Answers:     []RR{},
+		Authorities: []RR{},
+		Additionals: []RR{},
+	}
+
+	return msg.Encode()
 }
