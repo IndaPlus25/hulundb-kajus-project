@@ -60,7 +60,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 				}
 				return variableName1.Encode()
 			} else {
-				cnameQuery, err := buildQuery(cnameTarget, msg.Questions[0].Type)
+				cnameQuery, err := dns.BuildQuery(cnameTarget, msg.Questions[0].Type)
 				if err != nil {
 					return nil, err
 				}
