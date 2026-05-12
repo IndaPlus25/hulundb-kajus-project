@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"hulundb-kajus-dns/resolver"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -29,7 +30,7 @@ func Start(addr string) error {
 		conn.Close()
 	}()
 
-	//Receives, sends to resolver, sends back
+	//Receives, spawns goroutine per query
 	buf := make([]byte, 512)
 	for {
 		n, addr, err := conn.ReadFrom(buf)
@@ -43,18 +44,32 @@ func Start(addr string) error {
 
 		fmt.Printf("Received %d bytes from %s\n", n, addr)
 
-		// Query upstream DNS resolver with the received packet
-		response, err := resolver.Resolve(buf[:n], 0)
-		if err != nil {
-			fmt.Println("Error resolving:", err)
-			continue
-		}
+		packet := make([]byte, n)
+		copy(packet, buf[:n])
 
-		// Send encoded response back to client
-		_, err = conn.WriteTo(response, addr)
-		if err != nil {
-			fmt.Println("Error writing response:", err)
-			return err
+		go handleQuery(conn, addr, packet)
+	}
+}
+
+func handleQuery(conn net.PacketConn, addr net.Addr, packet []byte) {
+
+	// Panic recovery - fångar fel så servern inte kraschar
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in handleQuery: %v", r)
 		}
+	}()
+
+	// Query upstream DNS resolver with the received packet
+	response, err := resolver.Resolve(packet, 0)
+	if err != nil {
+		fmt.Println("Error resolving:", err)
+		return
+	}
+
+	// Send encoded response back to client
+	_, err = conn.WriteTo(response, addr)
+	if err != nil {
+		fmt.Println("Error writing response:", err)
 	}
 }
