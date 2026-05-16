@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+type TimeoutError struct {
+	error
+}
+
 func Resolve(query []byte, depth int) ([]byte, error) {
 
 	if depth > 10 {
@@ -138,28 +142,49 @@ func queryRootServers(query []byte) (string, error) {
 }
 
 func sendDNS(query []byte, target string) ([]byte, error) {
-	//Connects to Root
-	conn, err := net.Dial("udp", target+":53")
-	if err != nil {
-		return nil, err
+	const maxRetries = 2
+	const timeout = 3 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		//Connects to Root
+		conn, err := net.Dial("udp", target+":53")
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+
+		//Sends the query
+		_, err = conn.Write(query)
+		if err != nil {
+			return nil, err
+		}
+
+		//Deadline for reading answer
+		conn.SetReadDeadline(time.Now().Add(timeout))
+		conn.SetWriteDeadline(time.Now().Add(timeout))
+
+		//Recieves the answer
+		buf := make([]byte, 4096)
+		n, err := conn.Read(buf)
+		if err != nil {
+			if isTimeoutError(err) {
+				fmt.Printf("Read timeout (attempt %d)\n", attempt+1)
+			}
+			continue
+		}
+		return buf[:n], nil
 	}
-	defer conn.Close()
+	// All retries exhausted
+	return nil, fmt.Errorf("nameserver %s failed after %d retries", target, maxRetries)
+}
 
-	//Sends the query
-	_, err = conn.Write(query)
-	if err != nil {
-		return nil, err
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	//Deadline for reading answer
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	//Recieves the answer
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return nil, err
+	// Check if it's a net.Timeout error
+	if netErr, ok := err.(net.Error); ok {
+		return netErr.Timeout()
 	}
-
-	return buf[:n], nil
+	return false
 }
