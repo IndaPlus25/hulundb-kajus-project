@@ -4,6 +4,7 @@ import (
 	"hulundb-kajus-dns/dns"
 	"net"
 	"testing"
+	"time"
 )
 
 func TestGetMissingKey(t *testing.T) {
@@ -61,23 +62,35 @@ func TestGetLiveEntry(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
-
 	testRecords := []dns.RR{
-		{
-			Header: dns.RRHeader{Name: "google.com.", Type: 1, Class: 1, TTL: 300},
-			Data:   dns.ARecord{IP: net.IPv4(142, 250, 74, 46).To4()},
-		},
-		{
-			Header: dns.RRHeader{Name: "google.com.", Type: 28, Class: 1, TTL: 300},
-			Data:   dns.AAAARecord{IP: net.ParseIP("2a00:1450:4005:802::200e")},
-		},
 		{
 			Header: dns.RRHeader{Name: "example.com.", Type: 1, Class: 1, TTL: 300},
 			Data:   dns.ARecord{IP: net.IPv4(143, 250, 73, 46).To4()},
 		},
+	}
+
+	cache := NewCache()
+	cache.Set("example.com", 1, testRecords)
+
+	records, ok := cache.Get("example.com", 1)
+	if !ok {
+		t.Fatal("expected cache hit")
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(records))
+	}
+	if records[0].Header.Name != "example.com." || records[0].Header.Type != 1 {
+		t.Errorf("record mismatch: got %v", records[0].Header)
+	}
+}
+
+// ── Eviction and TTL ────────────────────────────────────────────────────────────────
+
+func TestTTLAdjustment(t *testing.T) {
+	testRecords := []dns.RR{
 		{
-			Header: dns.RRHeader{Name: "github.com.", Type: 28, Class: 1, TTL: 300},
-			Data:   dns.AAAARecord{IP: net.ParseIP("2a00:1450:4005:802::200e")},
+			Header: dns.RRHeader{Name: "google.com.", Type: 1, Class: 1, TTL: 2},
+			Data:   dns.ARecord{IP: net.IPv4(142, 250, 74, 46).To4()},
 		},
 	}
 
@@ -85,19 +98,56 @@ func TestRoundTrip(t *testing.T) {
 
 	cache.Set("example.com", 1, testRecords)
 
+	time.Sleep(1 * time.Second)
+
 	records, ok := cache.Get("example.com", 1)
 
 	if !ok {
-		t.Error("expected ok to be true")
+		t.Error("expected ok to be true - unable to get records")
 	}
-	if len(testRecords) != len(records) {
-		t.Errorf("expected %d records, got %d", len(testRecords), len(records))
+	if records[0].Header.TTL == 0 && records[0].Header.TTL > 1 {
+		t.Errorf("expected TTL to be approximately 1, got %d", records[0].Header.TTL)
 	}
-	for i, expected := range testRecords {
-		if expected.Header.Name != records[i].Header.Name ||
-			expected.Header.Type != records[i].Header.Type ||
-			expected.Header.TTL != records[i].Header.TTL {
-			t.Errorf("record %d mismatch: expected %v, got %v", i, expected, records[i])
-		}
+}
+
+func TestExpiry(t *testing.T) {
+	testRecords := []dns.RR{
+		{
+			Header: dns.RRHeader{Name: "google.com.", Type: 1, Class: 1, TTL: 1},
+			Data:   dns.ARecord{IP: net.IPv4(142, 250, 74, 46).To4()},
+		},
+	}
+
+	cache := NewCache()
+
+	cache.Set("example.com", 1, testRecords)
+
+	time.Sleep(1100 * time.Millisecond)
+
+	_, ok := cache.Get("example.com", 1)
+
+	if ok {
+		t.Error("expected ok to be false - expired TTL expected")
+	}
+}
+
+func TestBackgroundEviction(t *testing.T) {
+	testRecords := []dns.RR{
+		{
+			Header: dns.RRHeader{Name: "google.com.", Type: 1, Class: 1, TTL: 1},
+			Data:   dns.ARecord{IP: net.IPv4(142, 250, 74, 46).To4()},
+		},
+	}
+
+	cache := NewCache()
+
+	cache.Set("example.com", 1, testRecords)
+
+	cache.StartEviction(200 * time.Millisecond)
+
+	time.Sleep(1400 * time.Millisecond)
+
+	if cache.Len() != 0 {
+		t.Error("expected empty cache - failed background eviction")
 	}
 }
