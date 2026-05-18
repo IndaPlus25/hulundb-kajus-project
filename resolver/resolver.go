@@ -130,9 +130,9 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 			}
 		}
 
-		//Nothing was found
+		//Nothing was found - return response even if partial
 		if nextTarget == "" {
-			return nil, fmt.Errorf("could not find next nameserver")
+			return response, nil
 		}
 
 		target = nextTarget
