@@ -343,6 +343,7 @@ var htmlContent = `<!DOCTYPE html>
 			text-align: center;
 			color: #667eea;
 			font-size: 14px;
+			padding: 20px;
 		}
 
 		.loading.show {
@@ -351,13 +352,13 @@ var htmlContent = `<!DOCTYPE html>
 
 		.spinner {
 			display: inline-block;
-			width: 12px;
-			height: 12px;
-			border: 2px solid #e0e0e0;
+			width: 32px;
+			height: 32px;
+			border: 4px solid #e0e0e0;
 			border-top-color: #667eea;
 			border-radius: 50%;
-			animation: spin 0.6s linear infinite;
-			margin-right: 8px;
+			animation: spin 0.8s linear infinite;
+			margin-bottom: 12px;
 		}
 
 		@keyframes spin {
@@ -368,7 +369,7 @@ var htmlContent = `<!DOCTYPE html>
 <body>
 	<div class="container">
 		<h1>DNS Resolver</h1>
-		<p class="subtitle">Slå upp domäner med vår DNS-server</p>
+		<p class="subtitle">Recursive DNS resolver - går igenom DNS-hierarkin</p>
 
 		<form id="resolveForm">
 			<div class="form-group">
@@ -394,8 +395,8 @@ var htmlContent = `<!DOCTYPE html>
 		</form>
 
 		<div class="loading" id="loading">
-			<span class="spinner"></span>
-			Söker...
+			<div class="spinner"></div>
+			Söker genom DNS-hierarkin...
 		</div>
 
 		<div class="result" id="result">
