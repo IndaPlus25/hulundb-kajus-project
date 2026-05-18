@@ -47,6 +47,33 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 			return nil, fmt.Errorf("malformed query: no questions")
 		}
 
+		// Check RCODE - handles non RCODE = 0
+		if msg.Header.RCode != dns.RCodeNoError {
+
+			if msg.Header.RCode == dns.RCodeNameError {
+				return response, nil
+			}
+
+			if len(msg.Authorities) > 0 {
+				nextTarget, found := tryAllNameservers(r, query, msg, depth)
+				if found {
+					target = nextTarget
+					continue
+				}
+			}
+
+			if msg.Header.RCode == dns.RCodeNameError {
+				// Cache NXDOMAIN
+				qname := msg.Questions[0].Name
+				qtype := msg.Questions[0].Type
+				r.cache.SetNegative(qname, qtype, 300)
+				return response, nil
+			}
+
+			// No NS to test, returns server response
+			return response, nil
+		}
+
 		if hasCNAMEOnly(msg.Answers, msg.Questions[0].Name, msg.Questions[0].Type) { //CNAME found
 			cnameTarget, foundCNAME := getCNAMETarget(msg.Answers, msg.Questions[0].Name)
 			if !foundCNAME {
@@ -89,50 +116,11 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 			}
 		}
 
-		// Try 1 — IP?
-		nextTarget := ""
-		for _, rr := range msg.Additionals {
-			if a, ok := rr.Data.(dns.ARecord); ok {
-				nextTarget = a.IP.String()
-				break
-			}
-		}
-
-		// Try 2 — Name?
-		if nextTarget == "" {
-			for _, rr := range msg.Authorities {
-				if ns, ok := rr.Data.(dns.NSRecord); ok {
-					nsQuery, err := dns.BuildQuery(ns.Name, 1)
-					if err != nil {
-						continue
-					}
-
-					nsResponse, err := r.Resolve(nsQuery, depth+1)
-					if err != nil {
-						continue
-					}
-
-					nsMsg, err := dns.DecodeMessage(nsResponse)
-					if err != nil {
-						continue
-					}
-
-					for _, nsRR := range nsMsg.Answers {
-						if a, ok := nsRR.Data.(dns.ARecord); ok {
-							nextTarget = a.IP.String()
-							break
-						}
-					}
-					if nextTarget != "" {
-						break
-					}
-				}
-			}
-		}
-
-		//Nothing was found - return response even if partial
-		if nextTarget == "" {
-			return response, nil
+		// Try all authorative NS
+		nextTarget, found := tryAllNameservers(r, query, msg, depth)
+		if !found {
+			// all failed NS returns - SERVFAIL
+			return buildServfailResponse(msg), nil
 		}
 
 		target = nextTarget
@@ -196,4 +184,71 @@ func isTimeoutError(err error) bool {
 		return netErr.Timeout()
 	}
 	return false
+}
+
+// tryAllNameservers - returns the next IP
+func tryAllNameservers(r *Resolver, query []byte, msg dns.Message, depth int) (string, bool) {
+	// Try 1 — Already an IP?
+	for _, rr := range msg.Additionals {
+		if a, ok := rr.Data.(dns.ARecord); ok {
+			return a.IP.String(), true
+		}
+	}
+
+	// Try 2 — loopa ALL NS
+	for _, rr := range msg.Authorities {
+		if ns, ok := rr.Data.(dns.NSRecord); ok {
+			// Try to get IP for NS
+			nsQuery, err := dns.BuildQuery(ns.Name, 1)
+			if err != nil {
+				continue
+			}
+
+			nsResponse, err := r.Resolve(nsQuery, depth+1)
+			if err != nil {
+				continue
+			}
+
+			nsMsg, err := dns.DecodeMessage(nsResponse)
+			if err != nil {
+				continue
+			}
+
+			// Was an A-record found for this NS?
+			for _, nsRR := range nsMsg.Answers {
+				if a, ok := nsRR.Data.(dns.ARecord); ok {
+					return a.IP.String(), true
+				}
+			}
+		}
+	}
+
+	// Ingen NS fungerade
+	return "", false
+}
+
+// Contruct DNS - respons for Serverfail instead of returning error
+func buildServfailResponse(msg dns.Message) []byte {
+	response := dns.Message{
+		Header: dns.Header{
+			ID:      msg.Header.ID,
+			QR:      true,
+			Opcode:  0,
+			RCode:   dns.RCodeServerFailure, // SERVFAIL = 2
+			QDCount: uint16(len(msg.Questions)),
+			ANCount: 0,
+			NSCount: 0,
+			ARCount: 0,
+		},
+		Questions:   msg.Questions,
+		Answers:     []dns.RR{},
+		Authorities: []dns.RR{},
+		Additionals: []dns.RR{},
+	}
+
+	encoded, err := response.Encode()
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
