@@ -19,6 +19,11 @@ type RData interface {
 	Encode() ([]byte, error)
 }
 
+type UnknownRecord struct {
+	Type    uint16
+	RawData []byte
+}
+
 type ARecord struct {
 	IP net.IP
 }
@@ -48,6 +53,11 @@ type SOARecord struct {
 type MXRecord struct {
 	Preference uint16
 	Exchange   string
+}
+
+func (r UnknownRecord) Encode() ([]byte, error) {
+	// Simply echo back the exact payload we received
+	return r.RawData, nil
 }
 
 func (r ARecord) Encode() ([]byte, error) {
@@ -216,7 +226,7 @@ func DecodeRData(msg []byte, offset int, rrType uint16, rdLength uint16) (RData,
 		return DecodeAAAARecord(rdata)
 	default:
 		// return nil, fmt.Errorf("unknown RData type")
-		return nil, nil
+		return UnknownRecord{Type: rrType, RawData: rdata}, nil
 	}
 }
 
