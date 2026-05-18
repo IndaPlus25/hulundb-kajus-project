@@ -9,13 +9,14 @@ import (
 )
 
 type ResolveRequest struct {
-	Domain string `json:"domain"`
+	Domain   string `json:"domain"`
+	RecordType string `json:"recordType"`
 }
 
 type ResolveResponse struct {
-	Domain string   `json:"domain"`
-	IPs    []string `json:"ips"`
-	Error  string   `json:"error,omitempty"`
+	Domain  string      `json:"domain"`
+	Results interface{} `json:"results"`
+	Error   string      `json:"error,omitempty"`
 }
 
 func Start(addr string) error {
@@ -53,7 +54,27 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query, err := dns.BuildQuery(req.Domain, dns.TypeA)
+	if req.RecordType == "" {
+		req.RecordType = "A"
+	}
+
+	var qtype uint16
+	switch req.RecordType {
+	case "A":
+		qtype = dns.TypeA
+	case "MX":
+		qtype = dns.TypeMX
+	case "AAAA":
+		qtype = dns.TypeAAAA
+	case "NS":
+		qtype = dns.TypeNS
+	case "CNAME":
+		qtype = dns.TypeCNAME
+	default:
+		qtype = dns.TypeA
+	}
+
+	query, err := dns.BuildQuery(req.Domain, qtype)
 	if err != nil {
 		resp := ResolveResponse{
 			Domain: req.Domain,
@@ -86,16 +107,39 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ips []string
-	for _, answer := range msg.Answers {
-		if aRecord, ok := answer.Data.(dns.ARecord); ok {
-			ips = append(ips, aRecord.IP.String())
+	var results interface{}
+
+	if qtype == dns.TypeMX {
+		var mxRecords []map[string]interface{}
+		for _, answer := range msg.Answers {
+			if mxRecord, ok := answer.Data.(dns.MXRecord); ok {
+				mxRecords = append(mxRecords, map[string]interface{}{
+					"preference": mxRecord.Preference,
+					"exchange":   mxRecord.Exchange,
+				})
+			}
 		}
+		results = mxRecords
+	} else {
+		var ips []string
+		for _, answer := range msg.Answers {
+			switch record := answer.Data.(type) {
+			case dns.ARecord:
+				ips = append(ips, record.IP.String())
+			case dns.AAAARecord:
+				ips = append(ips, record.IP.String())
+			case dns.NSRecord:
+				ips = append(ips, record.Name)
+			case dns.CNAMERecord:
+				ips = append(ips, record.Name)
+			}
+		}
+		results = ips
 	}
 
 	resp := ResolveResponse{
-		Domain: req.Domain,
-		IPs:    ips,
+		Domain:  req.Domain,
+		Results: results,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -170,6 +214,22 @@ var htmlContent = `<!DOCTYPE html>
 		}
 
 		input[type="text"]:focus {
+			outline: none;
+			border-color: #667eea;
+		}
+
+		select {
+			width: 100%;
+			padding: 12px 16px;
+			border: 2px solid #e0e0e0;
+			border-radius: 8px;
+			font-size: 16px;
+			transition: border-color 0.3s;
+			background-color: white;
+			cursor: pointer;
+		}
+
+		select:focus {
 			outline: none;
 			border-color: #667eea;
 		}
@@ -250,6 +310,25 @@ var htmlContent = `<!DOCTYPE html>
 			margin-bottom: 0;
 		}
 
+		.record-item {
+			font-family: 'Monaco', 'Menlo', monospace;
+			font-size: 14px;
+			padding: 10px;
+			background: white;
+			border-radius: 6px;
+			margin-bottom: 8px;
+			word-break: break-all;
+		}
+
+		.record-item:last-child {
+			margin-bottom: 0;
+		}
+
+		.record-item strong {
+			color: #667eea;
+			margin-right: 8px;
+		}
+
 		.error-message {
 			color: #f44336;
 			font-size: 14px;
@@ -301,6 +380,16 @@ var htmlContent = `<!DOCTYPE html>
 					required
 				>
 			</div>
+			<div class="form-group">
+				<label for="recordType">Record-typ</label>
+				<select id="recordType">
+					<option value="A">A (IPv4)</option>
+					<option value="MX">MX (Mail)</option>
+					<option value="AAAA">AAAA (IPv6)</option>
+					<option value="NS">NS (Nameserver)</option>
+					<option value="CNAME">CNAME (Alias)</option>
+				</select>
+			</div>
 			<button type="submit" id="submitBtn">Slå upp</button>
 		</form>
 
@@ -318,6 +407,7 @@ var htmlContent = `<!DOCTYPE html>
 	<script>
 		const form = document.getElementById('resolveForm');
 		const domainInput = document.getElementById('domain');
+		const recordTypeSelect = document.getElementById('recordType');
 		const submitBtn = document.getElementById('submitBtn');
 		const loading = document.getElementById('loading');
 		const result = document.getElementById('result');
@@ -328,6 +418,7 @@ var htmlContent = `<!DOCTYPE html>
 			e.preventDefault();
 
 			const domain = domainInput.value.trim();
+			const recordType = recordTypeSelect.value;
 			if (!domain) return;
 
 			submitBtn.disabled = true;
@@ -340,23 +431,29 @@ var htmlContent = `<!DOCTYPE html>
 					headers: {
 						'Content-Type': 'application/json',
 					},
-					body: JSON.stringify({ domain }),
+					body: JSON.stringify({ domain, recordType }),
 				});
 
 				const data = await response.json();
-				resultDomain.textContent = data.domain;
+				resultDomain.textContent = domain + ' (' + recordType + ')';
 
 				if (data.error) {
 					result.classList.add('error');
 					resultContent.innerHTML = '<div class="error-message">' + data.error + '</div>';
-				} else if (data.ips && data.ips.length > 0) {
+				} else if (data.results && Array.isArray(data.results) && data.results.length > 0) {
 					result.classList.add('success');
-					resultContent.innerHTML = data.ips
-						.map(ip => '<div class="ip-address">' + ip + '</div>')
-						.join('');
+					if (recordType === 'MX') {
+						resultContent.innerHTML = data.results
+							.map(mx => '<div class="record-item"><strong>' + mx.preference + '</strong> - ' + mx.exchange + '</div>')
+							.join('');
+					} else {
+						resultContent.innerHTML = data.results
+							.map(item => '<div class="ip-address">' + item + '</div>')
+							.join('');
+					}
 				} else {
 					result.classList.add('error');
-					resultContent.innerHTML = '<div class="error-message">Ingen IP-adress hittad</div>';
+					resultContent.innerHTML = '<div class="error-message">Ingen record hittad</div>';
 				}
 
 				result.classList.add('show');
