@@ -2,12 +2,25 @@ package resolver
 
 import (
 	"fmt"
+	"hulundb-kajus-dns/cache"
 	"hulundb-kajus-dns/dns"
 	"net"
 	"time"
 )
 
-func Resolve(query []byte, depth int) ([]byte, error) {
+type TimeoutError struct {
+	error
+}
+
+type Resolver struct {
+	cache *cache.Cache
+}
+
+func New(c *cache.Cache) *Resolver {
+	return &Resolver{cache: c}
+}
+
+func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 
 	if depth > 10 {
 		return nil, fmt.Errorf("too many redirects")
@@ -34,6 +47,32 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 			return nil, fmt.Errorf("malformed query: no questions")
 		}
 
+		cacheResult := r.cache.Get(msg.Questions[0].Name, msg.Questions[0].Type)
+
+		if cacheResult.Found {
+			cacheMessage := dns.Message{
+				Header: dns.Header{
+					ID:      msg.Header.ID,
+					QR:      true,
+					Opcode:  0,
+					RD:      false,
+					QDCount: 1,
+					ANCount: uint16(len(cacheResult.Records)),
+					NSCount: 0,
+					ARCount: 0,
+				},
+				Questions:   msg.Questions,
+				Answers:     cacheResult.Records,
+				Authorities: []dns.RR{},
+				Additionals: []dns.RR{},
+			}
+			return cacheMessage.Encode()
+		}
+		// if cacheResult.Negative {
+		//
+
+		// }
+
 		if hasCNAMEOnly(msg.Answers, msg.Questions[0].Name, msg.Questions[0].Type) { //CNAME found
 			cnameTarget, foundCNAME := getCNAMETarget(msg.Answers, msg.Questions[0].Name)
 			if !foundCNAME {
@@ -42,7 +81,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 
 			matchingRecords := filterByNameAndType(msg.Answers, cnameTarget, msg.Questions[0].Type)
 			if matchingRecords != nil { // correct target provided by server
-				variableName1 := dns.Message{
+				cnameMessage := dns.Message{
 					Header: dns.Header{
 						ID:      msg.Header.ID,
 						QR:      true,
@@ -58,21 +97,27 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 					Authorities: []dns.RR{},
 					Additionals: []dns.RR{},
 				}
-				return variableName1.Encode()
+				r.cache.Set(msg.Questions[0].Name, msg.Questions[0].Type, matchingRecords)
+				return cnameMessage.Encode()
 			} else {
 				cnameQuery, err := dns.BuildQuery(cnameTarget, msg.Questions[0].Type)
 				if err != nil {
 					return nil, err
 				}
-				return Resolve(cnameQuery, depth+1)
+				return r.Resolve(cnameQuery, depth+1)
 			}
 
 		} else {
+			hasAnswer := false
 			for _, rr := range msg.Answers {
 				if rr.Header.Type == msg.Questions[0].Type {
-					// Found the answer type we asked for
-					return response, nil
+					hasAnswer = true
+					break
 				}
+			}
+			if hasAnswer {
+				r.cache.Set(msg.Questions[0].Name, msg.Questions[0].Type, msg.Answers)
+				return response, nil
 			}
 		}
 
@@ -94,7 +139,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 						continue
 					}
 
-					nsResponse, err := Resolve(nsQuery, depth+1)
+					nsResponse, err := r.Resolve(nsQuery, depth+1)
 					if err != nil {
 						continue
 					}
@@ -138,28 +183,49 @@ func queryRootServers(query []byte) (string, error) {
 }
 
 func sendDNS(query []byte, target string) ([]byte, error) {
-	//Connects to Root
-	conn, err := net.Dial("udp", target+":53")
-	if err != nil {
-		return nil, err
+	const maxRetries = 2
+	const timeout = 3 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		//Connects to Root
+		conn, err := net.Dial("udp", target+":53")
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+
+		//Sends the query
+		_, err = conn.Write(query)
+		if err != nil {
+			return nil, err
+		}
+
+		//Deadline for reading answer
+		conn.SetReadDeadline(time.Now().Add(timeout))
+		conn.SetWriteDeadline(time.Now().Add(timeout))
+
+		//Recieves the answer
+		buf := make([]byte, 4096)
+		n, err := conn.Read(buf)
+		if err != nil {
+			if isTimeoutError(err) {
+				fmt.Printf("Read timeout (attempt %d)\n", attempt+1)
+			}
+			continue
+		}
+		return buf[:n], nil
 	}
-	defer conn.Close()
+	// All retries exhausted
+	return nil, fmt.Errorf("nameserver %s failed after %d retries", target, maxRetries)
+}
 
-	//Sends the query
-	_, err = conn.Write(query)
-	if err != nil {
-		return nil, err
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
 	}
-
-	//Deadline for reading answer
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-
-	//Recieves the answer
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return nil, err
+	// Check if it's a net.Timeout error
+	if netErr, ok := err.(net.Error); ok {
+		return netErr.Timeout()
 	}
-
-	return buf[:n], nil
+	return false
 }

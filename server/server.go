@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"hulundb-kajus-dns/resolver"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -10,7 +11,7 @@ import (
 	"syscall"
 )
 
-func Start(addr string) error {
+func Start(addr string, r *resolver.Resolver) error {
 
 	//Listening on addr
 	conn, err := net.ListenPacket("udp", addr)
@@ -29,9 +30,10 @@ func Start(addr string) error {
 		conn.Close()
 	}()
 
-	//Receives, sends to resolver, sends back
-	buf := make([]byte, 512)
+	//Receives, spawns goroutine per query
+
 	for {
+		buf := make([]byte, 512)
 		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			if strings.Contains(err.Error(), "use of closed network connection") {
@@ -43,18 +45,32 @@ func Start(addr string) error {
 
 		fmt.Printf("Received %d bytes from %s\n", n, addr)
 
-		// Query upstream DNS resolver with the received packet
-		response, err := resolver.Resolve(buf[:n], 0)
-		if err != nil {
-			fmt.Println("Error resolving:", err)
-			continue
-		}
+		packet := make([]byte, n)
+		copy(packet, buf[:n])
 
-		// Send encoded response back to client
-		_, err = conn.WriteTo(response, addr)
-		if err != nil {
-			fmt.Println("Error writing response:", err)
-			return err
+		go handleQuery(conn, addr, packet, r)
+	}
+}
+
+func handleQuery(conn net.PacketConn, addr net.Addr, packet []byte, r *resolver.Resolver) {
+
+	// Panic recovery - fångar fel så servern inte kraschar
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in handleQuery: %v", r)
 		}
+	}()
+
+	// Query upstream DNS resolver with the received packet
+	response, err := r.Resolve(packet, 0)
+	if err != nil {
+		fmt.Println("Error resolving:", err)
+		return
+	}
+
+	// Send encoded response back to client
+	_, err = conn.WriteTo(response, addr)
+	if err != nil {
+		fmt.Println("Error writing response:", err)
 	}
 }

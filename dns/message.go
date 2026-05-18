@@ -171,13 +171,17 @@ func DecodeMessage(msg []byte) (Message, error) {
 		m.Authorities = append(m.Authorities, rr)
 	}
 	// loop and append to additionals
-	for i := 0; i < int(header.ARCount); i++ {
-		rr, newOffset, err := DecodeRR(msg, offset)
-		if err != nil {
-			return Message{}, err
+	if m.Header.QR {
+		for i := 0; i < int(header.ARCount); i++ {
+			rr, newOffset, err := DecodeRR(msg, offset)
+			if err != nil {
+				return Message{}, err
+			}
+			offset = newOffset
+			m.Additionals = append(m.Additionals, rr)
 		}
-		offset = newOffset
-		m.Additionals = append(m.Additionals, rr)
+	} else {
+		m.Header.ARCount = 0
 	}
 
 	return m, nil
@@ -228,6 +232,8 @@ func (m Message) Encode() ([]byte, error) {
 	return buf, nil
 }
 
+// constructs a DNS query message with a random ID and one question,
+// then encodes it into wire format.
 func BuildQuery(name string, qtype uint16) ([]byte, error) {
 	id := uint16(rand.Intn(65536))
 	msg := Message{
@@ -235,7 +241,7 @@ func BuildQuery(name string, qtype uint16) ([]byte, error) {
 			ID:      id,    // random id
 			QR:      false, // query
 			Opcode:  0,     // standard query
-			RD:      false, // no recursion desired
+			RD:      true,  // no recursion desired
 			QDCount: 1,
 			ANCount: 0,
 			NSCount: 0,

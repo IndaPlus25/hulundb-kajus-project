@@ -1,16 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"hulundb-kajus-dns/cache"
+	"hulundb-kajus-dns/resolver"
 	"hulundb-kajus-dns/server"
-	"os"
+	"time"
 )
 
 func main() {
-	err := server.Start("0.0.0.0:53")
-
-	if err != nil {
-		fmt.Println("Failed to start server:", err)
-		os.Exit(1)
-	}
+	c := cache.NewCache()
+	c.StartEviction(60 * time.Second)
+	r := resolver.New(c)
+	server.Start("0.0.0.0:53", r)
 }
