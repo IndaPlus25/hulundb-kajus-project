@@ -31,8 +31,9 @@ func Start(addr string, r *resolver.Resolver) error {
 	}()
 
 	//Receives, spawns goroutine per query
-	buf := make([]byte, 512)
+
 	for {
+		buf := make([]byte, 512)
 		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
 			if strings.Contains(err.Error(), "use of closed network connection") {
