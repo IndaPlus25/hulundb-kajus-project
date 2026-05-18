@@ -2,6 +2,7 @@
 package resolver
 
 import (
+	"hulundb-kajus-dns/cache"
 	"hulundb-kajus-dns/dns"
 	"net"
 	"strings"
@@ -27,8 +28,11 @@ func TestResolveGoogle(t *testing.T) {
 		0x00, 0x01, // type A
 		0x00, 0x01, // class IN
 	}
+	c := cache.NewCache()
+	c.StartEviction(10000 * time.Second)
+	r := New(c)
 
-	response, err := Resolve(query, 0)
+	response, err := r.Resolve(query, 0)
 
 	if err != nil {
 		t.Fatalf("Got error: %v", err)
@@ -52,7 +56,11 @@ func TestResolveTimeout(t *testing.T) {
 
 // Tests that an empty packet doesn't crash
 func _TestResolvEmpty(t *testing.T) {
-	_, err := Resolve([]byte{}, 0)
+	c := cache.NewCache()
+	c.StartEviction(10000 * time.Second)
+	r := New(c)
+
+	_, err := r.Resolve([]byte{}, 0)
 	// We expect an error, not a crash
 	if err == nil {
 		t.Fatal("Expected error for empty packet")

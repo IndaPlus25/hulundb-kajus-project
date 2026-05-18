@@ -149,7 +149,7 @@ func DecodeCNAMERecord(msg []byte, offset int) (CNAMERecord, error) {
 
 func DecodeMXRecord(msg []byte, offset int) (MXRecord, error) {
 	if offset+2 > len(msg) {
-		return MXRecord{}, fmt.Errorf("not enough bytes") // lägg till felmeddelande
+		return MXRecord{}, fmt.Errorf("not enough bytes")
 	}
 
 	preferance := binary.BigEndian.Uint16(msg[offset : offset+2])
