@@ -1,11 +1,13 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"hulundb-kajus-dns/dns"
-	"hulundb-kajus-dns/resolver"
+	"log"
+	"net"
 	"net/http"
+	"time"
 )
 
 type ResolveRequest struct {
@@ -58,85 +60,62 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 		req.RecordType = "A"
 	}
 
-	var qtype uint16
+	log.Printf("Resolving %s (%s)", req.Domain, req.RecordType)
+
+	var results []string
+	var err error
+
 	switch req.RecordType {
 	case "A":
-		qtype = dns.TypeA
-	case "MX":
-		qtype = dns.TypeMX
+		results, err = resolveA(req.Domain)
 	case "AAAA":
-		qtype = dns.TypeAAAA
+		results, err = resolveAAAA(req.Domain)
+	case "MX":
+		mxResults, err := resolveMX(req.Domain)
+		if err != nil {
+			resp := ResolveResponse{
+				Domain: req.Domain,
+				Error:  fmt.Sprintf("MX lookup failed: %v", err),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ResolveResponse{
+			Domain:  req.Domain,
+			Results: mxResults,
+		})
+		return
 	case "NS":
-		qtype = dns.TypeNS
+		results, err = resolveNS(req.Domain)
 	case "CNAME":
-		qtype = dns.TypeCNAME
+		results, err = resolveCNAME(req.Domain)
 	default:
-		qtype = dns.TypeA
+		results, err = resolveA(req.Domain)
 	}
 
-	query, err := dns.BuildQuery(req.Domain, qtype)
 	if err != nil {
 		resp := ResolveResponse{
 			Domain: req.Domain,
-			Error:  fmt.Sprintf("Failed to build query: %v", err),
+			Error:  fmt.Sprintf("Lookup failed: %v", err),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
-	response, err := resolver.Resolve(query, 0)
-	if err != nil {
+	if len(results) == 0 {
 		resp := ResolveResponse{
 			Domain: req.Domain,
-			Error:  fmt.Sprintf("Resolution failed: %v", err),
+			Error:  "No records found",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 		return
 	}
 
-	msg, err := dns.DecodeMessage(response)
-	if err != nil {
-		resp := ResolveResponse{
-			Domain: req.Domain,
-			Error:  fmt.Sprintf("Failed to decode response: %v", err),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	var results interface{}
-
-	if qtype == dns.TypeMX {
-		var mxRecords []map[string]interface{}
-		for _, answer := range msg.Answers {
-			if mxRecord, ok := answer.Data.(dns.MXRecord); ok {
-				mxRecords = append(mxRecords, map[string]interface{}{
-					"preference": mxRecord.Preference,
-					"exchange":   mxRecord.Exchange,
-				})
-			}
-		}
-		results = mxRecords
-	} else {
-		var ips []string
-		for _, answer := range msg.Answers {
-			switch record := answer.Data.(type) {
-			case dns.ARecord:
-				ips = append(ips, record.IP.String())
-			case dns.AAAARecord:
-				ips = append(ips, record.IP.String())
-			case dns.NSRecord:
-				ips = append(ips, record.Name)
-			case dns.CNAMERecord:
-				ips = append(ips, record.Name)
-			}
-		}
-		results = ips
-	}
-
+	log.Printf("Found %d results for %s", len(results), req.Domain)
 	resp := ResolveResponse{
 		Domain:  req.Domain,
 		Results: results,
@@ -144,6 +123,89 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func resolveA(domain string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []string
+	for _, ip := range ips {
+		if ip.IP.To4() != nil {
+			results = append(results, ip.IP.String())
+		}
+	}
+	return results, nil
+}
+
+func resolveAAAA(domain string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []string
+	for _, ip := range ips {
+		if ip.IP.To4() == nil && ip.IP.To16() != nil {
+			results = append(results, ip.IP.String())
+		}
+	}
+	return results, nil
+}
+
+func resolveMX(domain string) ([]map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mxs, err := net.DefaultResolver.LookupMX(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]interface{}
+	for _, mx := range mxs {
+		results = append(results, map[string]interface{}{
+			"preference": mx.Pref,
+			"exchange":   mx.Host,
+		})
+	}
+	return results, nil
+}
+
+func resolveNS(domain string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	nss, err := net.DefaultResolver.LookupNS(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []string
+	for _, ns := range nss {
+		results = append(results, ns.Host)
+	}
+	return results, nil
+}
+
+func resolveCNAME(domain string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cname, err := net.DefaultResolver.LookupCNAME(ctx, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	return []string{cname}, nil
 }
 
 var htmlContent = `<!DOCTYPE html>
@@ -298,12 +360,6 @@ var htmlContent = `<!DOCTYPE html>
 			border-radius: 6px;
 			margin-bottom: 8px;
 			word-break: break-all;
-			cursor: pointer;
-			transition: background 0.2s;
-		}
-
-		.ip-address:hover {
-			background: #e8f5e9;
 		}
 
 		.ip-address:last-child {
@@ -369,7 +425,7 @@ var htmlContent = `<!DOCTYPE html>
 <body>
 	<div class="container">
 		<h1>DNS Resolver</h1>
-		<p class="subtitle">Recursive DNS resolver - går igenom DNS-hierarkin</p>
+		<p class="subtitle">DNS lookup tool</p>
 
 		<form id="resolveForm">
 			<div class="form-group">
@@ -385,8 +441,8 @@ var htmlContent = `<!DOCTYPE html>
 				<label for="recordType">Record-typ</label>
 				<select id="recordType">
 					<option value="A">A (IPv4)</option>
-					<option value="MX">MX (Mail)</option>
 					<option value="AAAA">AAAA (IPv6)</option>
+					<option value="MX">MX (Mail)</option>
 					<option value="NS">NS (Nameserver)</option>
 					<option value="CNAME">CNAME (Alias)</option>
 				</select>
@@ -396,7 +452,7 @@ var htmlContent = `<!DOCTYPE html>
 
 		<div class="loading" id="loading">
 			<div class="spinner"></div>
-			Söker genom DNS-hierarkin...
+			Söker...
 		</div>
 
 		<div class="result" id="result">
@@ -469,7 +525,6 @@ var htmlContent = `<!DOCTYPE html>
 			}
 		});
 
-		// Focus on domain input on page load
 		domainInput.focus();
 	</script>
 </body>
