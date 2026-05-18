@@ -1,6 +1,8 @@
 package server
 
 import (
+	"hulundb-kajus-dns/cache"
+	"hulundb-kajus-dns/resolver"
 	"net"
 	"testing"
 	"time"
@@ -8,7 +10,11 @@ import (
 
 // Criterion 1: Server starts and listens
 func TestServerStarts(t *testing.T) {
-	go Start("0.0.0.0:15353")
+	c := cache.NewCache()
+	c.StartEviction(60 * time.Second)
+	r := resolver.New(c)
+
+	go Start("0.0.0.0:15353", r)
 	time.Sleep(50 * time.Millisecond) // give server time to start
 
 	// Try to connect — if it succeeds server is listening
@@ -21,7 +27,11 @@ func TestServerStarts(t *testing.T) {
 
 // Criterion 2: Server receives raw bytes
 func TestServerReceivesBytes(t *testing.T) {
-	go Start("0.0.0.0:15354")
+	c := cache.NewCache()
+	c.StartEviction(60 * time.Second)
+	r := resolver.New(c)
+
+	go Start("0.0.0.0:15354", r)
 	time.Sleep(50 * time.Millisecond)
 
 	conn, err := net.Dial("udp", "127.0.0.1:15354")
@@ -40,7 +50,11 @@ func TestServerReceivesBytes(t *testing.T) {
 
 // Criterion 3: Server doesn't crash with garbage data
 func TestServerHandlesGarbage(t *testing.T) {
-	go Start("0.0.0.0:15355")
+	c := cache.NewCache()
+	c.StartEviction(60 * time.Second)
+	r := resolver.New(c)
+
+	go Start("0.0.0.0:15355", r)
 	time.Sleep(50 * time.Millisecond)
 
 	conn, err := net.Dial("udp", "127.0.0.1:15355")

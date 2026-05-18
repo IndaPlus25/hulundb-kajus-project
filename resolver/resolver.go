@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"fmt"
+	"hulundb-kajus-dns/cache"
 	"hulundb-kajus-dns/dns"
 	"net"
 	"time"
@@ -11,7 +12,15 @@ type TimeoutError struct {
 	error
 }
 
-func Resolve(query []byte, depth int) ([]byte, error) {
+type Resolver struct {
+	cache *cache.Cache
+}
+
+func New(c *cache.Cache) *Resolver {
+	return &Resolver{cache: c}
+}
+
+func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 
 	if depth > 10 {
 		return nil, fmt.Errorf("too many redirects")
@@ -68,7 +77,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				return Resolve(cnameQuery, depth+1)
+				return r.Resolve(cnameQuery, depth+1)
 			}
 
 		} else {
@@ -98,7 +107,7 @@ func Resolve(query []byte, depth int) ([]byte, error) {
 						continue
 					}
 
-					nsResponse, err := Resolve(nsQuery, depth+1)
+					nsResponse, err := r.Resolve(nsQuery, depth+1)
 					if err != nil {
 						continue
 					}

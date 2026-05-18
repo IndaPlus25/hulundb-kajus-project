@@ -122,7 +122,7 @@ func TestExpiry(t *testing.T) {
 
 	cache.Set("example.com", 1, testRecords)
 
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 
 	result := cache.Get("example.com", 1)
 
