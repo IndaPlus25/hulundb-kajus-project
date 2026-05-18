@@ -73,6 +73,32 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 			// No NS to test, returns server response
 			return response, nil
 		}
+    
+		cacheResult := r.cache.Get(msg.Questions[0].Name, msg.Questions[0].Type)
+
+		if cacheResult.Found {
+			cacheMessage := dns.Message{
+				Header: dns.Header{
+					ID:      msg.Header.ID,
+					QR:      true,
+					Opcode:  0,
+					RD:      false,
+					QDCount: 1,
+					ANCount: uint16(len(cacheResult.Records)),
+					NSCount: 0,
+					ARCount: 0,
+				},
+				Questions:   msg.Questions,
+				Answers:     cacheResult.Records,
+				Authorities: []dns.RR{},
+				Additionals: []dns.RR{},
+			}
+			return cacheMessage.Encode()
+		}
+		// if cacheResult.Negative {
+		//
+
+		// }
 
 		if hasCNAMEOnly(msg.Answers, msg.Questions[0].Name, msg.Questions[0].Type) { //CNAME found
 			cnameTarget, foundCNAME := getCNAMETarget(msg.Answers, msg.Questions[0].Name)
@@ -82,7 +108,7 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 
 			matchingRecords := filterByNameAndType(msg.Answers, cnameTarget, msg.Questions[0].Type)
 			if matchingRecords != nil { // correct target provided by server
-				variableName1 := dns.Message{
+				cnameMessage := dns.Message{
 					Header: dns.Header{
 						ID:      msg.Header.ID,
 						QR:      true,
@@ -98,7 +124,8 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 					Authorities: []dns.RR{},
 					Additionals: []dns.RR{},
 				}
-				return variableName1.Encode()
+				r.cache.Set(msg.Questions[0].Name, msg.Questions[0].Type, matchingRecords)
+				return cnameMessage.Encode()
 			} else {
 				cnameQuery, err := dns.BuildQuery(cnameTarget, msg.Questions[0].Type)
 				if err != nil {
@@ -108,11 +135,16 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 			}
 
 		} else {
+			hasAnswer := false
 			for _, rr := range msg.Answers {
 				if rr.Header.Type == msg.Questions[0].Type {
-					// Found the answer type we asked for
-					return response, nil
+					hasAnswer = true
+					break
 				}
+			}
+			if hasAnswer {
+				r.cache.Set(msg.Questions[0].Name, msg.Questions[0].Type, msg.Answers)
+				return response, nil
 			}
 		}
 
