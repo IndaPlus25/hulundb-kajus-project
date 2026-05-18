@@ -9,7 +9,7 @@ import (
 )
 
 type ResolveRequest struct {
-	Domain   string `json:"domain"`
+	Domain     string `json:"domain"`
 	RecordType string `json:"recordType"`
 }
 
