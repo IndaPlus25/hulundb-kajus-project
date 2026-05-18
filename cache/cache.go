@@ -11,46 +11,55 @@ type CacheKey struct {
 	Type uint16
 }
 
-type CacheEntry struct {
-	Records   []dns.RR
-	ExpiresAt time.Time
+type entry struct {
+	records   []dns.RR
+	expiresAt time.Time
+	negative  bool
+}
+
+type CacheResult struct {
+	Records  []dns.RR
+	Found    bool
+	Negative bool
 }
 
 type Cache struct {
 	mu      sync.RWMutex
-	entries map[CacheKey]CacheEntry
+	entries map[CacheKey]entry
 }
 
 func NewCache() *Cache {
 	return &Cache{
-		entries: make(map[CacheKey]CacheEntry),
+		entries: make(map[CacheKey]entry),
 	}
 }
 
-func (c *Cache) Get(name string, qtype uint16) ([]dns.RR, bool) {
+func (c *Cache) Get(name string, qtype uint16) CacheResult {
 	c.mu.RLock()
 	entry, ok := c.entries[CacheKey{Name: name, Type: qtype}]
 	c.mu.RUnlock()
 
 	if !ok {
-		return nil, false
+		return CacheResult{nil, false, false}
 	}
-	if !time.Now().Before(entry.ExpiresAt) {
-		return nil, false
+	if !time.Now().Before(entry.expiresAt) {
+		return CacheResult{nil, false, false}
 	}
-	result := make([]dns.RR, 0, len(entry.Records))
+	if entry.negative {
+		return CacheResult{nil, true, true}
+	}
 
-	for _, rr := range entry.Records {
+	result := make([]dns.RR, 0, len(entry.records))
+
+	remaining := time.Until(entry.expiresAt).Seconds()
+
+	for _, rr := range entry.records {
 		copy := rr
-		remaining := time.Until(entry.ExpiresAt).Seconds()
-		if remaining <= 0 {
-			return nil, false
-		}
 		copy.Header.TTL = uint32(remaining)
 		result = append(result, copy)
 	}
 
-	return result, true
+	return CacheResult{result, true, false}
 }
 
 func (c *Cache) Set(name string, qtype uint16, records []dns.RR) {
@@ -61,7 +70,14 @@ func (c *Cache) Set(name string, qtype uint16, records []dns.RR) {
 	c.mu.Lock()
 	ttl := minTTL(records)
 	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
-	c.entries[CacheKey{Name: name, Type: qtype}] = CacheEntry{Records: records, ExpiresAt: expiresAt}
+	c.entries[CacheKey{Name: name, Type: qtype}] = entry{records: records, expiresAt: expiresAt, negative: false}
+	c.mu.Unlock()
+}
+
+func (c *Cache) SetNegative(name string, qtype uint16, ttl uint32) {
+	c.mu.Lock()
+	expiresAt := time.Now().Add(time.Duration(ttl) * time.Second)
+	c.entries[CacheKey{Name: name, Type: qtype}] = entry{records: nil, expiresAt: expiresAt, negative: true}
 	c.mu.Unlock()
 }
 
@@ -91,7 +107,7 @@ func (c *Cache) evict() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for key, entry := range c.entries {
-		if now.After(entry.ExpiresAt) {
+		if now.After(entry.expiresAt) {
 			delete(c.entries, key)
 		}
 	}

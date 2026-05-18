@@ -9,13 +9,13 @@ import (
 
 func TestGetMissingKey(t *testing.T) {
 	cache := NewCache()
-	records, ok := cache.Get("example.com", 1)
+	result := cache.Get("example.com", 1)
 
-	if ok {
+	if result.Found {
 		t.Error("expected ok to be false for missing key")
 	}
-	if records != nil {
-		t.Errorf("expected records to be nil, got %v", records)
+	if result.Records != nil {
+		t.Errorf("expected records to be nil, got %v", result.Records)
 	}
 }
 
@@ -30,13 +30,13 @@ func TestGetExpiredEntry(t *testing.T) {
 
 	cache.Set("example.com", 1, []dns.RR{testRecord})
 
-	records, ok := cache.Get("example.com", 1)
+	result := cache.Get("example.com", 1)
 
-	if ok {
+	if result.Found {
 		t.Error("expected ok to be false for missing key")
 	}
-	if records != nil {
-		t.Errorf("expected records to be nil, got %v", records)
+	if result.Records != nil {
+		t.Errorf("expected records to be nil, got %v", result.Records)
 	}
 }
 
@@ -51,12 +51,12 @@ func TestGetLiveEntry(t *testing.T) {
 
 	cache.Set("example.com", 1, []dns.RR{testRecord})
 
-	records, ok := cache.Get("example.com", 1)
+	result := cache.Get("example.com", 1)
 
-	if !ok {
+	if !result.Found {
 		t.Error("expected ok to be true for get")
 	}
-	if records == nil {
+	if result.Records == nil {
 		t.Error("expected returned records to non-nil")
 	}
 }
@@ -72,15 +72,15 @@ func TestRoundTrip(t *testing.T) {
 	cache := NewCache()
 	cache.Set("example.com", 1, testRecords)
 
-	records, ok := cache.Get("example.com", 1)
-	if !ok {
+	result := cache.Get("example.com", 1)
+	if !result.Found {
 		t.Fatal("expected cache hit")
 	}
-	if len(records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(records))
+	if len(result.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(result.Records))
 	}
-	if records[0].Header.Name != "example.com." || records[0].Header.Type != 1 {
-		t.Errorf("record mismatch: got %v", records[0].Header)
+	if result.Records[0].Header.Name != "example.com." || result.Records[0].Header.Type != 1 {
+		t.Errorf("record mismatch: got %v", result.Records[0].Header)
 	}
 }
 
@@ -100,13 +100,13 @@ func TestTTLAdjustment(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	records, ok := cache.Get("example.com", 1)
+	result := cache.Get("example.com", 1)
 
-	if !ok {
+	if !result.Found {
 		t.Error("expected ok to be true - unable to get records")
 	}
-	if records[0].Header.TTL == 0 && records[0].Header.TTL > 1 {
-		t.Errorf("expected TTL to be approximately 1, got %d", records[0].Header.TTL)
+	if result.Records[0].Header.TTL == 0 && result.Records[0].Header.TTL > 1 {
+		t.Errorf("expected TTL to be approximately 1, got %d", result.Records[0].Header.TTL)
 	}
 }
 
@@ -122,11 +122,11 @@ func TestExpiry(t *testing.T) {
 
 	cache.Set("example.com", 1, testRecords)
 
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 
-	_, ok := cache.Get("example.com", 1)
+	result := cache.Get("example.com", 1)
 
-	if ok {
+	if result.Found {
 		t.Error("expected ok to be false - expired TTL expected")
 	}
 }

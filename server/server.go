@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-func Start(addr string) error {
+func Start(addr string, r *resolver.Resolver) error {
 
 	//Listening on addr
 	conn, err := net.ListenPacket("udp", addr)
@@ -47,11 +47,11 @@ func Start(addr string) error {
 		packet := make([]byte, n)
 		copy(packet, buf[:n])
 
-		go handleQuery(conn, addr, packet)
+		go handleQuery(conn, addr, packet, r)
 	}
 }
 
-func handleQuery(conn net.PacketConn, addr net.Addr, packet []byte) {
+func handleQuery(conn net.PacketConn, addr net.Addr, packet []byte, r *resolver.Resolver) {
 
 	// Panic recovery - fångar fel så servern inte kraschar
 	defer func() {
@@ -61,7 +61,7 @@ func handleQuery(conn net.PacketConn, addr net.Addr, packet []byte) {
 	}()
 
 	// Query upstream DNS resolver with the received packet
-	response, err := resolver.Resolve(packet, 0)
+	response, err := r.Resolve(packet, 0)
 	if err != nil {
 		fmt.Println("Error resolving:", err)
 		return

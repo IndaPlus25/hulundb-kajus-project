@@ -228,6 +228,8 @@ func (m Message) Encode() ([]byte, error) {
 	return buf, nil
 }
 
+// constructs a DNS query message with a random ID and one question,
+// then encodes it into wire format.
 func BuildQuery(name string, qtype uint16) ([]byte, error) {
 	id := uint16(rand.Intn(65536))
 	msg := Message{
@@ -235,7 +237,7 @@ func BuildQuery(name string, qtype uint16) ([]byte, error) {
 			ID:      id,    // random id
 			QR:      false, // query
 			Opcode:  0,     // standard query
-			RD:      false, // no recursion desired
+			RD:      true,  // no recursion desired
 			QDCount: 1,
 			ANCount: 0,
 			NSCount: 0,
