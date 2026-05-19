@@ -77,6 +77,10 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 		if msg.Header.RCode != dns.RCodeNoError {
 
 			if msg.Header.RCode == dns.RCodeNameError {
+				// Cache NXDOMAIN
+				qname := msg.Questions[0].Name
+				qtype := msg.Questions[0].Type
+				r.cache.SetNegative(qname, qtype, 300)
 				return response, nil
 			}
 
@@ -86,14 +90,6 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 					target = nextTarget
 					continue
 				}
-			}
-
-			if msg.Header.RCode == dns.RCodeNameError {
-				// Cache NXDOMAIN
-				qname := msg.Questions[0].Name
-				qtype := msg.Questions[0].Type
-				r.cache.SetNegative(qname, qtype, 300)
-				return response, nil
 			}
 
 			// No NS to test, returns server response
