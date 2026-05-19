@@ -281,9 +281,9 @@ func tryAllNameservers(r *Resolver, query []byte, msg dns.Message, depth int) (s
 			}
 		}
 	}
-	// All retries exhausted
-	return nil, fmt.Errorf("nameserver %s failed after %d retries", target, maxRetries)
-}
+	// 	// All retries exhausted
+	// 	return nil, fmt.Errorf("nameserver %s failed after %d retries", target, maxRetries)
+	// }
 
 	// Ingen NS fungerade
 	return "", false

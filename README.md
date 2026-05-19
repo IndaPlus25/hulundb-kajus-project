@@ -1,146 +1,191 @@
-# hulundb-kajus — Recursive DNS Resolver in Go
+# hulundb-kajus-dns
 
-> **DD1349 Project** | Build a functioning recursive DNS resolver from scratch in Go, capable of answering real queries by walking the DNS hierarchy — no external resolver libraries.
-
----
-
-## Goal
-
-A fully recursive DNS resolver that handles real-world queries end-to-end: parsing the DNS wire format, walking the hierarchy from root servers down to authoritative nameservers, caching results with TTL respect, and serving concurrent clients. Validated with `dig @127.0.0.1 -p 5353 google.com`.
+A recursive DNS resolver built from scratch in Go, developed as a course project for DD1349. Rather than forwarding queries to an upstream resolver, it walks the DNS hierarchy itself — starting from the root nameservers and following referrals down to an authoritative answer. It includes a TTL-aware cache, CNAME chain resolution, and a web interface.
 
 ---
 
-## Milestones
+## What it does
 
-### Milestone 1 — Protocol & Stub Resolver (~25hrs each)
+When a client sends a DNS query to this resolver, it:
 
-Implement DNS wire format parsing/encoding and a UDP server that forwards queries to an upstream resolver (e.g. `8.8.8.8`). This validates packet parsing before building recursive logic.
+1. Checks the cache for an existing answer
+2. If not cached, contacts a root nameserver
+3. Follows NS referrals down through TLD and authoritative nameservers
+4. Handles CNAME chains by recursively resolving the alias target
+5. Caches the result and returns the answer to the client
 
-**Issues:**
-- Parse DNS message headers (12-byte binary structure, flags, counts)
-- Parse and encode question, answer, authority, and additional sections
-- Parse all resource record types: A, AAAA, NS, CNAME, MX, SOA
-- Implement DNS name compression (pointer labels, RFC 1035 §4.1.4)
-- UDP server listening on port 5353
-- Forward queries to upstream resolver and relay responses
-- Integration test: `dig @127.0.0.1 -p 5353 google.com` returns a real answer
-
-**Work split:** One person owns wire format (parsing/encoding); the other owns the UDP server and forwarding logic. Integrate at end of M1.
+It also handles edge cases: NXDOMAIN responses are negatively cached, SERVFAIL is returned when all nameservers are exhausted, and panics in query handlers are recovered so the server keeps running.
 
 ---
 
-### Milestone 2 — Recursive Resolution (~30hrs each)
+## Requirements 
 
-Replace forwarding with a full recursive walk of the DNS tree: starting from root nameservers, following referrals through TLD servers to authoritative servers.
-
-**Issues:**
-- Hardcode the 13 root nameserver addresses (from IANA `named.cache`)
-- Implement the recursive lookup loop: roots → referral → TLD → referral → authoritative → answer
-- Handle A, AAAA, CNAME, NS, MX record types in resolution
-- CNAME chain following (e.g. `www.github.com` resolves via a CNAME)
-- Correctly distinguish referrals from authoritative answers via response flags
-- Handle glue records (nameserver addresses in the additional section of referrals)
+- **Go 1.21 or later**
+- **Root / administrator privileges** — the DNS server binds to port 53, which requires elevated permissions on most systems
+- No external Go dependencies — built entirely on the standard library
 
 ---
 
-### Milestone 3 — Caching & Robustness (~25hrs each)
+## Getting started
 
-Make it production-worthy: TTL-respecting cache, failure handling, and concurrent query serving.
+Clone and build:
 
-**Issues:**
-- In-memory cache keyed on `(name, type)`, respecting TTL from responses
-- TTL decrement as time passes; evict expired entries
-- Cache negative responses (NXDOMAIN) to avoid hammering servers for nonexistent names
-- Timeout and retry logic for unresponsive nameservers
-- Concurrent query handling via goroutines (`sync.Map` or mutex-protected cache)
-- Basic metrics: cache hit rate, query latency, upstream queries per second
-
----
-
-## Must-Haves / Nice-to-Haves / Risks
-
-| Category | Item |
-|---|---|
-| **Must-have** | DNS wire format parser & encoder (RFC 1035 compliant) |
-| **Must-have** | UDP server on port 5353 |
-| **Must-have** | Recursive resolution from root → TLD → authoritative |
-| **Must-have** | A, AAAA, NS, CNAME, MX record type support |
-| **Must-have** | CNAME chain following |
-| **Must-have** | TTL-respecting in-memory cache |
-| **Must-have** | NXDOMAIN negative caching |
-| **Must-have** | Concurrent query handling with safe shared state |
-| **Must-have** | Timeout/retry for unresponsive nameservers |
-| **Nice-to-have** | Basic metrics (cache hit rate, latency, upstream QPS) |
-| **Nice-to-have** | DNS over TCP for responses > 512 bytes |
-| **Nice-to-have** | CLI tool to inspect cache state |
-| **Nice-to-have** | Zone file parsing |
-| **Nice-to-have** | DNS over TLS (DoT) to `1.1.1.1` |
-| **Risk** | Name compression edge cases (pointer loops, forward pointers) |
-| **Risk** | Glue record handling in referrals |
-| **Risk** | CNAME chains that are circular or excessively long |
-| **Risk** | Race conditions in concurrent cache access |
-| **Risk** | Upstream rate limiting / blocking during development |
-| **Risk** | Integration complexity at the M1 boundary (wire format ↔ server) |
-
----
-
-## Requirements
-
-### Business Requirements
-- A developer should be able to resolve arbitrary domain names against our server and get correct, cached answers with no dependency on a third-party resolver library.
-
-### System Requirements
-- The server must implement the DNS wire format per RFC 1035.
-- The server must walk the DNS hierarchy from root servers to authoritative servers without delegating to an upstream resolver.
-- The server must cache responses respecting TTL values and serve cached answers to repeated queries.
-- The server must handle concurrent queries safely.
-
-### Functional Requirements
-- Parse and encode all DNS message sections (header, question, answer, authority, additional).
-- Implement DNS name compression encoding and decoding.
-- Hardcode root nameserver hints from `https://www.internic.net/domain/named.cache`.
-- Recursive resolution loop: query roots → follow referrals → return authoritative answer.
-- Cache keyed on `(name, type)` with TTL-based expiry; evict on read if expired.
-- Each incoming query runs in its own goroutine; cache protected by `sync.Map` or `sync.Mutex`.
-
----
-
-## Architecture
-
-```
-Client (dig, browser)
-        │  query
-        ▼
-  ┌─────────────────────────┐
-  │     Your DNS Server     │
-  │                         │
-  │  Cache ──► Resolver     │──► Root servers (a.root-servers.net …)
-  │  TTL-aware  recursive   │         │ referral
-  │  in-memory  walk logic  │◄────────┘
-  └─────────────────────────┘
-        │  answer           ──► TLD servers (.com, .se, .org …)
-        ▼                            │ referral
-     Client                         ▼
-                             Auth. servers (ns1.google.com …)
-                                     │ answer
-                                     ▼
-                              (back to resolver)
+```bash
+git clone https://github.com/hulundb/hulundb-kajus-dns.git
+cd hulundb-kajus-dns
+go build ./...
 ```
 
+Run (requires root or `sudo` for port 53):
+
+```bash
+sudo go run main.go
+```
+
+This starts two services:
+- **DNS server** on `0.0.0.0:53` (UDP)
+- **Web interface** on `0.0.0.0:8080`
+
+Test with `dig`:
+
+```bash
+dig @127.0.0.1 example.com A
+dig @127.0.0.1 example.com MX
+```
+
+Shut down cleanly with `Ctrl+C` — the server handles `SIGINT` and `SIGTERM`.
+
 ---
 
-## Key References
+## Testing with a browser
 
-- [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035) — Sections 3 (data formats) and 4 (messages)
-- [IANA root hints](https://www.internic.net/domain/named.cache) — the 13 root nameserver addresses to hardcode
-- [miekg/dns](https://github.com/miekg/dns) — full Go DNS library; useful for reading source when stuck on parsing edge cases (do not use as a dependency)
-- `dig +trace google.com` — makes dig perform its own recursive resolution, printing every step; use as ground truth for what your resolver should do
+You can route your entire OS through the resolver by pointing your system DNS to `127.0.0.1`. Any domain you visit in the browser will then be resolved by this server. Remember to revert the setting when you're done.
+
+**macOS**
+
+1. Open **System Settings → Wi-Fi** (or **Network** for wired)
+2. Click **Details** next to your active connection
+3. Go to the **DNS** tab
+4. Remove existing entries and add `127.0.0.1`
+5. Click **OK** and then **Apply**
+
+**Windows**
+
+1. Open **Settings → Network & Internet → Wi-Fi** (or **Ethernet**)
+2. Click on your active connection → **Edit** under DNS server assignment
+3. Switch to **Manual**, enable **IPv4**
+4. Set **Preferred DNS** to `127.0.0.1`
+5. Click **Save**
+
+**Linux (NetworkManager)**
+
+1. Open **Settings → Network** or **Wi-Fi**
+2. Click the gear icon next to your active connection
+3. Go to the **IPv4** tab
+4. Set **DNS** to `127.0.0.1` and turn off **Automatic DNS**
+5. Apply and reconnect
+
+> **Note:** Some browsers (Chrome, Firefox) use their own DNS-over-HTTPS by default, which bypasses system DNS. Disable it if your queries aren't hitting the resolver:
+> - **Chrome:** Settings → Privacy and security → Security → turn off *Use secure DNS*
+> - **Firefox:** Settings → Privacy & Security → scroll to DNS over HTTPS → set to *Off*
 
 ---
 
-## Stretch Goals
+## Project structure
 
-- Zone file parsing
-- DNS over TCP for large responses (> 512 bytes)
-- Small CLI tool to inspect cache contents
-- DNS over TLS (DoT) to `1.1.1.1`
+```
+hulundb-kajus-dns/
+├── go.mod
+├── go.sum
+├── main.go                    # Entry point. Wires everything together and starts the server.
+│
+├── dns/                       # Core DNS protocol — wire format only, no IO.
+│   ├── message.go             # Message struct, header parsing/encoding.
+│   ├── question.go            # Question section parsing/encoding.
+│   ├── record.go              # Resource record types (A, AAAA, NS, CNAME, MX, SOA).
+│   ├── name.go                # Name parsing, encoding, and compression/decompression.
+│   └── message_test.go        # Table-driven tests for round-trip parsing.
+│
+├── server/                    # UDP listener. Accepts queries, hands off to resolver.
+│   ├── server.go              # ListenAndServe, goroutine-per-query dispatch.
+│   └── server_test.go
+│
+├── web/                    
+│   └──  web.go              
+│
+├── resolver/                  # The recursive walk logic. No parsing, no caching here.
+│   ├── resolver.go            # Resolve() — the main recursive loop.
+│   ├── roots.go               # Hardcoded root nameserver addresses.
+│   └── cname.go
+│   └── resolver_test.go
+│
+├── cache/                     # TTL-aware in-memory cache. No DNS logic here.
+│   ├── cache.go               # Get/Set/evict, TTL decrement, NXDOMAIN entries.
+│   └── cache_test.go
+│
+     (NOT IMPLEMENTED)
+└── metrics/                   # Counters and timers. Thin wrapper, no dependencies.
+    └── metrics.go             # CacheHits, Latency, UpstreamQueries.
+```
+
+![alt text](image.png)
+
+Dependency flow: `main → server → resolver → dns / cache`
+
+---
+
+## How the cache works
+
+The cache stores DNS records keyed by `(name, type)`. TTLs are respected — on read, the remaining TTL is recalculated and written into the returned records. A background goroutine evicts expired entries every 60 seconds.
+
+Negative caching is also supported: NXDOMAIN responses are stored with a 300-second TTL so repeated queries for non-existent names don't trigger full resolution walks.
+
+---
+
+## How resolution works
+
+Each call to `Resolve()` takes a raw DNS query and a `depth` counter. The depth counter bounds CNAME chain length at 10 to prevent infinite loops.
+
+**Normal resolution:**
+1. Decode the query and check the cache
+2. Contact a root nameserver
+3. Loop: send the query to the current target, decode the response
+4. If the response has NS referrals, extract the next nameserver IP — first from glue records in the additional section, then by recursively resolving the NS hostname
+5. Repeat until an authoritative answer is received
+
+**CNAME handling:**
+When the answer section contains only a CNAME for the queried name (and no records of the requested type), the resolver:
+- Extracts the CNAME target
+- Checks if the server already included records for the target in the same response
+- If yes, assembles and returns the combined answer
+- If no, recursively resolves the target and prepends the CNAME record(s)
+
+---
+
+## Project scope and milestones
+
+**M1 — Wire format and UDP server**
+- DNS message parsing and serialisation (RFC 1035)
+- Label encoding, compression pointer handling
+- UDP server with per-query goroutines
+
+**M2 — Recursive resolution**
+- Full recursive resolution: root → TLD → authoritative
+- Typed record extraction (A, NS, CNAME, MX, etc.)
+- CNAME chain following with depth limiting
+- NS hostname resolution via glue records with recursive fallback
+- SERVFAIL construction when all nameservers fail
+**M3 — Caching and robustness**
+- TTL-aware positive and negative caching
+- Background cache eviction
+- Panic recovery in query handlers
+- Graceful shutdown on `SIGINT` / `SIGTERM`
+
+---
+
+## Authors
+
+- Hugo ([hulundb@kth.se](https://github.com/hulu05)) — wire format (`dns/`), CNAME resolution, record type handling, cache
+- Kajus ([kajus@kth.se](https://github.com/kajus-sir)) — UDP server, recursive resolution loop, NS referral detection, glue record handling
+
+Course: DD1349
