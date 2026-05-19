@@ -26,6 +26,32 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 		return nil, fmt.Errorf("too many redirects")
 	}
 
+	decodedQuery, err := dns.DecodeMessage(query)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheResult := r.cache.Get(decodedQuery.Questions[0].Name, decodedQuery.Questions[0].Type)
+	if cacheResult.Found {
+		cacheMessage := dns.Message{
+			Header: dns.Header{
+				ID:      decodedQuery.Header.ID,
+				QR:      true,
+				Opcode:  0,
+				RD:      false,
+				QDCount: 1,
+				ANCount: uint16(len(cacheResult.Records)),
+				NSCount: 0,
+				ARCount: 0,
+			},
+			Questions:   decodedQuery.Questions,
+			Answers:     cacheResult.Records,
+			Authorities: []dns.RR{},
+			Additionals: []dns.RR{},
+		}
+		return cacheMessage.Encode()
+	}
+
 	target, err := queryRootServers(query)
 	if err != nil {
 		return nil, err
@@ -70,40 +96,18 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 			return response, nil
 		}
 
-		cacheResult := r.cache.Get(msg.Questions[0].Name, msg.Questions[0].Type)
-
-		if cacheResult.Found {
-			cacheMessage := dns.Message{
-				Header: dns.Header{
-					ID:      msg.Header.ID,
-					QR:      true,
-					Opcode:  0,
-					RD:      false,
-					QDCount: 1,
-					ANCount: uint16(len(cacheResult.Records)),
-					NSCount: 0,
-					ARCount: 0,
-				},
-				Questions:   msg.Questions,
-				Answers:     cacheResult.Records,
-				Authorities: []dns.RR{},
-				Additionals: []dns.RR{},
-			}
-			return cacheMessage.Encode()
-		}
-		// if cacheResult.Negative {
-		//
-
-		// }
-
 		if hasCNAMEOnly(msg.Answers, msg.Questions[0].Name, msg.Questions[0].Type) { //CNAME found
+
 			cnameTarget, foundCNAME := getCNAMETarget(msg.Answers, msg.Questions[0].Name)
 			if !foundCNAME {
 				return nil, fmt.Errorf("malformed response from server: cname detected and not found")
 			}
 
-			matchingRecords := filterByNameAndType(msg.Answers, cnameTarget, msg.Questions[0].Type)
-			if matchingRecords != nil { // correct target provided by server
+			cnameRecords := filterByNameAndType(msg.Answers, msg.Questions[0].Name, dns.TypeCNAME)
+			targetRecords := filterByNameAndType(msg.Answers, cnameTarget, msg.Questions[0].Type)
+
+			fullAnswers := append(cnameRecords, targetRecords...)
+			if targetRecords != nil { // correct target provided by server
 				cnameMessage := dns.Message{
 					Header: dns.Header{
 						ID:      msg.Header.ID,
@@ -111,23 +115,50 @@ func (r *Resolver) Resolve(query []byte, depth int) ([]byte, error) {
 						Opcode:  0,
 						RD:      false,
 						QDCount: 1,
-						ANCount: uint16(len(matchingRecords)),
+						ANCount: uint16(len(fullAnswers)),
 						NSCount: 0,
 						ARCount: 0,
 					},
 					Questions:   msg.Questions,
-					Answers:     matchingRecords,
+					Answers:     fullAnswers,
 					Authorities: []dns.RR{},
 					Additionals: []dns.RR{},
 				}
-				r.cache.Set(msg.Questions[0].Name, msg.Questions[0].Type, matchingRecords)
+				r.cache.Set(msg.Questions[0].Name, msg.Questions[0].Type, fullAnswers)
 				return cnameMessage.Encode()
 			} else {
 				cnameQuery, err := dns.BuildQuery(cnameTarget, msg.Questions[0].Type)
 				if err != nil {
 					return nil, err
 				}
-				return r.Resolve(cnameQuery, depth+1)
+				rawResponse, err := r.Resolve(cnameQuery, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				recursiveMsg, err := dns.DecodeMessage(rawResponse)
+				if err != nil {
+					return nil, err
+				}
+
+				fullAnswers := append(cnameRecords, recursiveMsg.Answers...)
+
+				fullMessage := dns.Message{
+					Header: dns.Header{
+						ID:      msg.Header.ID,
+						QR:      true,
+						Opcode:  0,
+						RD:      false,
+						QDCount: 1,
+						ANCount: uint16(len(fullAnswers)),
+						NSCount: 0,
+						ARCount: 0,
+					},
+					Questions:   msg.Questions,
+					Answers:     fullAnswers,
+					Authorities: []dns.RR{},
+					Additionals: []dns.RR{},
+				}
+				return fullMessage.Encode()
 			}
 
 		} else {
